@@ -98,5 +98,5 @@
 - `docs/美图式创作平台产品清单.xlsx`：R01–R05、J01–J05、F001–F065、O01–O10、D01–D12。
 - `docs/product-research.md`、`docs/design-spec.md`、`docs/verification.md`。
 - `docs/architecture-review.md`（早前的独立评审意见）。
-- `docs/architecture-review.zh-CN.md`：**不存在**，未参考。
+- `docs/architecture-review.zh-CN.md`：编写 Part 1–11 时不存在；之后加入 `main`（`e7ef345`），内容为英文评审的中文翻译，已在 Part 12 中读取。
 - 原型源码：`src/App.jsx`、`src/components/*.jsx`、`src/lib/*.js`、`src/data/*`、`scripts/*.mjs`。

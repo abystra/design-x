@@ -20,6 +20,7 @@
 | 9 | [09-nfr-and-validation.md](09-nfr-and-validation.md) | I. 非功能需求与验证计划 |
 | 10 | [10-roadmap-and-plan.md](10-roadmap-and-plan.md) | J. 路线图、Backlog、团队与排期、迁移步骤、决策日志、风险、待决问题 |
 | 11 | [11-sources.md](11-sources.md) | 引用来源与核验状态 |
+| 12 | [12-engineering-structure.md](12-engineering-structure.md) | 工程仓库结构（评审稿）：架构到代码的映射、目录树、依赖规则、部署单元、原型过渡 |
 
 建议阅读顺序：决策者读 1 → 10；前端读 1 → 4 → 7 → 3；后端和 AI 读 1 → 5 → 7 → 6 → 3；基础设施读 6 → 2 → 9。
 
@@ -33,7 +34,7 @@
 | `docs/design-spec.md` | ✅ 已完整读取 | |
 | `docs/verification.md` | ✅ 已完整读取 | 原型的验证与未验收项 |
 | `docs/architecture-review.md` | ✅ 已完整读取 | 本会话早前产出的独立评审；这里把它当作“意见”，不当作已批准方案。 |
-| `docs/architecture-review.zh-CN.md` | ❌ **文件不存在** | 已检查 `origin/main`、`origin/claude/tender-gauss-t34ry0` 和本地磁盘，都没有这个文件。本方案**没有**参考它的任何内容。 |
+| `docs/architecture-review.zh-CN.md` | ✅ 已读取（编写 Part 1–11 时尚不存在，之后于 `main` 提交 `e7ef345` 加入） | 内容是 `architecture-review.md` 的中文翻译，没有新增决策，因此不影响 Part 1–11 的结论。 |
 | 前端原型源码 `src/**`、`scripts/**`、`package.json` | ✅ 已读取 | `App.jsx`、`AIStudio.jsx`、`Editor.jsx`（结构与导出路径）、`Workbench.jsx`/`Workspace.jsx`/`Catalog.jsx`（函数结构）、`studioModel.js`、`studioSession.js`、`catalog.json`、`templates.js`、检查脚本 |
 
 ### 对原型的事实认定（避免把模拟当成能力）
