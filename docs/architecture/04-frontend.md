@@ -2,6 +2,8 @@
 
 > 2026-10-31 非 AI 实施补充：当前保留 React/Vite/CSS 与原型 DOM Board，已实现世界坐标空间 hash、视口/预加载边缘裁剪、局部 RAF 手势和轻量 Board 保存，预览继续复用 `doc-render`。本轮未引入 tldraw/rbush，也未迁移路由或状态库；下表仍是架构推荐，不代表依赖均已落地。200 画板固定负载及实际性能边界见 [Board 性能验证](../implementation/board-performance.md)。
 
+> 2026-10-31 选型复评：以 [Part 12](12-tldraw-adoption-review.md) 为本阶段接入依据。下文 `BoardEngine`、逐项 `BoardOp`、`items/frame/z` 与 `board_views` 仍属目标设计，当前代码尚未实现。建议先兼容现有 `results/notes/sections` 和整包 revision/ack 保存，再在内部开关下验证 tldraw；尚未决定默认迁移。
+
 ## D.1 技术栈选择
 
 | 层 | 推荐 | 许可 | 理由 | 备选 |
@@ -49,7 +51,7 @@
 | 分发限制 | 不得作为独立产品分发，只能作为其他应用的一部分 | LICENSE.md [已核验] |
 | 试用 | 100 天试用，每个业务单元一次 | LICENSE.md（“一次试用”）[已核验]；“100 天”来自官方页面摘录 [二手] |
 | Hobby 许可 | 面向非商业项目，需申请，**保留“made with tldraw”水印** | 官方页面摘录 [二手] |
-| 商业价格 | **官方未公开**，按价值定价，需联系销售；第三方传闻约 $6,000/年 **[未核实，不可作为预算依据]** | [二手] |
+| 商业价格 | **官方未公开金额**，年度许可按价值询价；不采用第三方价格传闻估算预算 | [官方定价，2026-10-31 重新读取](https://tldraw.dev/pricing) |
 | 协作（sync） | `@tldraw/sync` 同样采用 tldraw license；官方称已购商业许可者使用 sync 不额外收费；可自托管，官方模板基于 Cloudflare Durable Objects，也提供 Node/Bun 通用服务端模板 | npm [已核验]；收费与模板说明 [二手] |
 | 内部工具 | 官方 FAQ 称公司内部产品也算商业用途 | [二手] |
 | 区域 | 许可条款未见地域限制；Cloudflare Durable Objects 在中国大陆的可用性**未核实**，自托管 sync 应走 Node 模板 | [待定] |
@@ -78,45 +80,47 @@
 | 无障碍 | 有键盘导航与屏幕阅读器支持 [二手] | 自写 | 弱 | 弱 | 中 |
 | 撤销/重做、剪贴板、快捷键 | ✅ 完整 | 自写（可复用 doc-core inverse ops） | 部分 | 自写 | ✅ |
 | 持久化 | 自有 store 快照；我们做适配层映射 | 直接就是 doc-core | 需映射 | 需映射 | 需映射 |
-| 性能：多 Artboard、大图 | 视口剔除（culling）+ 空间索引；DOM shape 多时需 LOD [二手] | 需自写剔除（rbush）、LOD 与虚拟化 | Canvas 渲染数量上限高 | 高 | 中 |
+| 性能：多 Artboard、大图 | 内置空间索引和 culling 隐藏 DOM；自定义预览仍需卸载/LOD，详见 Part 12 | 已实现空间 hash、卸载与分帧挂载；更复杂素材和 LOD 继续验证 | Canvas 渲染数量上限高 | 高 | 中 |
 | 缩略图 | 我们自己的 render.thumbnail | 同左 | 同左 | 同左 | 同左 |
 | 协作 | `@tldraw/sync`（同许可）或自写 | 自写（Yjs 或服务端 ops） | 自写 | 自写 | 有协作方案（需自写后端） |
-| 导出与一致性 | Board 不导出，Artboard 导出走自有 Renderer | 同左 | 同左 | 同左 | 同左 |
+| 导出与一致性 | Board 暂无独立像素导出；`.dxproj` 包含 Board，Artboard 像素导出走自有 Renderer | 同左 | 同左 | 同左 | 同左 |
 | 数据所有权与可移植性 | 适配层后由我们拥有 | 完全拥有 | 拥有 | 拥有 | 拥有 |
 | 许可与成本 | **Source-available；商业生产需付费；hobby 有水印** | 全部 MIT/CC0，零许可成本 | MIT | MIT | MIT |
 | 扩展性 | 强（工具、UI 覆盖、绑定） | 完全可控 | 中 | 中 | 弱 |
 | 维护与锁定 | 依赖供应商版本与许可变化；**适配层可降低锁定** | 维护成本最高 | 社区规模较小（中国开发者主导）[假设] | 成熟，但交互全部自写 | 产品形态绑定白板 |
-| 预估自研工作量（达到 MVP Board 质量） | 2–4 周（集成 + 自定义 shape + 映射层） | 8–12 周 | 6–10 周 | 8–12 周 | 不适合 |
+| 当前迁移工作量 | 需经真实项目适配试验估算 | 已有实现与 200 板测试，按缺失能力估算增量 | 未复评 | 未复评 | 未复评 |
 
-> 工作量为基于团队熟练度的数量级估计 **[假设]**，M0 spike 后重估。
+> 原稿周数估计早于当前非 AI 实现，已撤下。候选能力比较不代表均已在本项目验证。
 
 ### D.2.4 推荐
 
 **推荐：方案 T（tldraw Board）作为首选，方案 D（自研 DOM Board）作为保底，两者都实现 `BoardEngine` 接口。**
 
-- 选 T 的理由：Board 是一等能力，MVP 需要完整的选择、吸附、对齐、撤销、剪贴板、快捷键和无障碍；tldraw 能把 8–12 周的自研压缩到 2–4 周，而且质量更高。
+- 优先验证 T 的理由：Board 是一等能力，成熟的选择、吸附、工具状态机和扩展机制可能降低后续维护成本。是否优于现有实现需比较真实交互与集成成本，不能预先承诺工期压缩或性能提升。
 - 选 T 的前提（M0 go/no-go）：
   1. 许可可接受：商业报价进入预算，或项目确认非商业并接受 hobby 水印（Q1、Q5）。
   2. 中文输入法和 CJK 在 Board 文字（便签、方案组标题）中表现正确。
-  3. 200 个 Artboard shape 加 100 个素材的 Board，平移缩放达到 ≥ 50 fps（提议目标）。
+  3. 复用现有 200 板 × 50 图层、100 便签、20 分区的固定负载和六项预算，并增加不同私有素材、全选与低倍率完整总览测试；具体口径见 Part 12。
   4. 抓包确认无未披露的外呼；若有，评估合规影响。
-- 任一前提不满足就切换到 D。由于持久化格式归我们所有（AD-01），切换只需替换前端适配层，**不需要迁移用户数据**。
+- 任一前提不满足则继续使用 D。保持现有语义时可以争取兼容旧数据；新增层级、缩放或绑定等语义仍需 schema 和项目包迁移。当前尚无已实现的适配层，不能承诺只换组件或零迁移。
 
 ### D.2.5 tldraw 集成边界（方案 T 的具体设计）
 
 **(1) 自定义 shape 映射**
 
+下表包含后续目标能力。首期仅兼容现有画板、便签和分区，Artboard 保持当前显示尺寸；展示缩放、素材节点、谱系和生成状态按 Part 12 的分阶段方案另行实现。
+
 | Board 条目 `kind` | tldraw shape type | 渲染 | 交互 |
 |---|---|---|---|
-| `artboard_ref` | `dx-artboard`（基于 `BaseBoxShapeUtil`） | 按 LOD：缩放 < 0.35 显示缩略图 `<img>`；0.35–1.5 显示 `doc-render` 只读 DOM；> 1.5 时 DOM 加高分辨率图片 | 双击进入编辑器；只允许等比缩放（Board 上的缩放只是显示比例，不改 Artboard 尺寸）；禁止旋转；悬停显示 AI 操作（继续修改、变体、导出） |
+| `artboard_ref` | `dx-artboard`（基于 `BaseBoxShapeUtil`） | 目标 LOD：缩放 < 0.35 显示缩略图 `<img>`；0.35–1.5 显示 `doc-render` 只读 DOM；> 1.5 时 DOM 加高分辨率图片；阈值需实测 | 双击进入编辑器；首期固定显示尺寸、禁止旋转；后续 schema 支持后可开放等比展示缩放，不改作品尺寸。AI 操作另属后续阶段 |
 | `asset` | `dx-asset` | 缩略图或预览渲染副本 | 拖入 Artboard（drop 到编辑器）、`@` 引用到对话 |
 | `result_group` | `dx-result-group`（类似 frame 的容器） | 标题、状态（生成中 2/4）、回合链接 | 整组移动；点标题定位到对话回合 |
-| `note` | 使用 tldraw 内置 `note` 或 `text` | — | 可编辑文字 |
-| `section` | tldraw 内置 `frame` | — | 分区 |
+| `note` | 首期 `dx-note` | 保留纯文本、颜色与宽高 | 可编辑文字；采用原生富文本需另做格式兼容 |
+| `section` | 首期平面 `dx-section` | 保留显式成员和绝对坐标 | 删除分区保留成员；不能直接套用内置 frame 的父子与裁剪语义 |
 | `lineage` | `arrow` + binding（只读，系统生成） | V1 → V2 连线 | 不可手动编辑 |
 | `placeholder` | `dx-placeholder` | 生成中或失败卡片 | 重试、取消 |
 
-**(2) 序列化与同步**（Board 文档是真相源，tldraw store 是视图模型）
+**(2) 序列化与同步**（目标设计；当前先兼容 snapshot API，见 Part 12）
 
 ```ts
 // packages/board/src/BoardEngine.ts（接口示意）
@@ -135,13 +139,13 @@ export interface BoardEngine {
 }
 ```
 
-- **本地 → 文档**：监听 tldraw store 中来源为用户、范围为文档的变更（`editor.store.listen(..., { source: 'user', scope: 'document' })`），把 shape 的创建、更新、删除翻译成 `BoardOp`（`insert_item`、`set_frame`、`set_parent`、`set_index`、`remove_item`），在一次交互结束时（pointer up）批量提交。
-- **文档 → 本地**：远端和 AI 的变更通过 `editor.store.mergeRemoteChanges(() => ...)` 应用，因此**不进入**用户的撤销栈。
+- **本地 → 文档**：监听 tldraw store 中来源为用户、范围为文档的变更（`editor.store.listen(..., { source: 'user', scope: 'document' })`），目标是投影为业务变更；当前首期仍保存自有 Board snapshot。提交边界必须覆盖拖动、键盘、粘贴、菜单和撤销，不能只依赖 pointer up。后续逐项 `BoardOp` 是单独的数据协议演进。
+- **文档 → 本地**：远端变更在异步取数完成后通过 `editor.store.mergeRemoteChanges(() => ...)` 同步应用，基本写入不进入本地历史；自定义 side effect 的衍生写入、异步越界及回环须专项验证，详见 Part 12。
 - **不持久化** tldraw 的 `instance`、`camera`、`pointer` 等会话记录；视口单独写入 `board_views`（按用户）。
 - 映射规则：`shape.id = "shape:" + item.id`；`shape.index = item.z`（都是分数索引字符串）；`shape.props` 只放渲染所需的字段，例如 `artboard_id`、`thumb_asset`、`w`、`h`，**不放 Artboard 内容**。
 - **版本锁定**：tldraw 版本固定，升级时跑映射层契约测试（Part 9）。
 
-> 上述 API 名称（`store.listen`、`mergeRemoteChanges`、`BaseBoxShapeUtil`、`HTMLContainer`）基于 tldraw 公开文档和示例 [二手]，M0 需对照 5.6 文档逐个确认。
+> 2026-10-31 已查阅官方 shape、store、history 文档与相关主线源码；这不等于锁定发行版的接入验证。映射契约、当前模型差异和来源见 Part 12。
 
 **(3) 坐标转换**
 
@@ -175,8 +179,8 @@ export interface BoardEngine {
    - 选择、框选：Selecto；变换：Moveable，带吸附与对齐参考线；
    - 撤销：doc-core inverse ops（与编辑器同一机制）；
    - LOD：与 T 方案同一套规则（缩略图 → `doc-render`）。
-3. **M0 同时做 T 和 D 的最小 spike**（各约 1 周），用同一套 200 Artboard 测试 Board 比较帧率、内存和中文输入法。
-4. 如果上线后才切换：用户数据零迁移，因为 Board 文档是自有格式；只需重新实现适配层，并让 E2E 测试套件（Board 交互用例）全部通过。
+3. **复用现有 DOM 实现作为对照**，在特性开关下完成 tldraw 最小真实链路，用同一套 200 Artboard 数据比较交互、DOM、帧间隔和内存，并验证中文输入法。
+4. 如果上线后才切换：先验证自有格式到目标引擎的往返映射。涉及新对象、层级或显示几何时显式迁移 schema 与项目包；不能仅凭数据格式自有就承诺零迁移。保持完整业务回归，见 Part 12。
 
 ## D.3 Artboard 编辑器
 

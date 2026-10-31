@@ -8,7 +8,7 @@
 
 最终 AI 执行架构已由用户明确为 **E2B Sandbox 内的 Harness 使用 Codex SDK**，替代原稿的自研轻量 Agent loop。API、Worker、Renderer、PostgreSQL、pg-boss、S3 兼容存储及产品拥有的 Creative Document 保持不变。业务权限、任务与成果持久化由控制面负责；沙箱只能通过受限业务工具/API 提交请求，不能直连数据库。详见 [ADR-0001](../adr/0001-codex-e2b.md) 和 Part 5 §E.4.3。
 
-本次仅核对相关官方文档并更新设计；**未实现、运行或验证 Codex/E2B 集成**。以下完整 MVP/AI 用户旅程是后续目标，不能当作本轮完成状态。原稿的第三方版本、许可与区域假设未在本次重新核查。
+本次仅核对相关官方文档并更新设计；**未实现、运行或验证 Codex/E2B 集成**。以下完整 MVP/AI 用户旅程是后续目标，不能当作本轮完成状态。2026-10-31 另完成 [tldraw 接入复评](12-tldraw-adoption-review.md)，核对 SDK 官方资料及现有 Board 差异；建议先验证再决定切换，尚未安装 SDK。其余原稿的第三方版本、许可与区域假设未因此重新核查。
 
 本目录是 Design-X 的实施导向架构方案，供团队估算、计划、建设和验证使用。正文用简体中文，技术术语、标识符和代码示例保留英文。
 
@@ -28,6 +28,7 @@
 | 9 | [09-nfr-and-validation.md](09-nfr-and-validation.md) | I. 非功能需求与验证计划 |
 | 10 | [10-roadmap-and-plan.md](10-roadmap-and-plan.md) | J. 路线图、Backlog、团队与排期、迁移步骤、决策日志、风险、待决问题 |
 | 11 | [11-sources.md](11-sources.md) | 引用来源与核验状态 |
+| 12 | [12-tldraw-adoption-review.md](12-tldraw-adoption-review.md) | AI 创作画布产品研究、tldraw 复评、现有 Board 接入差异与验收阶段 |
 
 建议阅读顺序：决策者读 1 → 10；前端读 1 → 4 → 7 → 3；后端和 AI 读 1 → 5 → 7 → 6 → 3；基础设施读 6 → 2 → 9。
 
@@ -44,7 +45,9 @@
 | `docs/architecture-review.zh-CN.md` | ❌ **文件不存在** | 已检查 `origin/main`、`origin/claude/tender-gauss-t34ry0` 和本地磁盘，都没有这个文件。本方案**没有**参考它的任何内容。 |
 | 前端原型源码 `src/**`、`scripts/**`、`package.json` | ✅ 已读取 | `App.jsx`、`AIStudio.jsx`、`Editor.jsx`（结构与导出路径）、`Workbench.jsx`/`Workspace.jsx`/`Catalog.jsx`（函数结构）、`studioModel.js`、`studioSession.js`、`catalog.json`、`templates.js`、检查脚本 |
 
-### 对原型的事实认定（避免把模拟当成能力）
+### 对原型的事实认定（2026-10-30 历史基线）
+
+以下是实施前原型的状态，不是当前系统能力清单。已实现的非 AI 后端与 Board 虚拟化见 [实施性能记录](../implementation/board-performance.md)，本轮代码核对见 [Part 12](12-tldraw-adoption-review.md)。
 
 - 原型是 **React 19 + Vite 6 + 纯 JavaScript**，没有 TypeScript、路由库或状态库，靠 URL hash 导航。
 - “AI 生成”是 `src/lib/studioModel.js` 里基于正则和规则的**确定性本地演示**（`source: 'demo-rules'`、`isDemo: true`），没有调用任何模型。视频只产出静态分镜。
