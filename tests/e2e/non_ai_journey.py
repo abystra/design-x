@@ -24,6 +24,7 @@ def main() -> int:
     parser.add_argument('--base-url', default=os.getenv('DESIGNX_E2E_URL', 'http://127.0.0.1:5173'))
     parser.add_argument('--output', type=Path)
     parser.add_argument('--skip-exports', action='store_true', help='Explicitly mark renderer checks skipped during development.')
+    parser.add_argument('--expect-ai-disabled', action='store_true', help='Require AI disabled and verify the explicit unavailable path; default never sends an AI request.')
     args = parser.parse_args()
     run_id = time.strftime('%Y%m%d-%H%M%S') + '-' + uuid4().hex[:6]
     output = args.output or ROOT / 'tests/e2e/.artifacts' / run_id
@@ -81,7 +82,11 @@ def main() -> int:
         try:
             health = context.request.get(args.base_url + '/api/health')
             assert health.ok and health.json()['status'] == 'ok', 'API and PostgreSQL must be healthy'
-            assert health.json()['aiEnabled'] is False
+            ai_enabled = health.json()['aiEnabled']
+            report['aiEnabled'] = ai_enabled
+            report['aiSubmissionAttempted'] = False
+            if args.expect_ai_disabled:
+                assert ai_enabled is False, '--expect-ai-disabled requires an AI-disabled API'
             current = 'register-personal-workspace'
             register(page, email, '端到端验收')
             assert api('/auth/me')['user']['email'] == email
@@ -217,18 +222,27 @@ def main() -> int:
             check(current, {'folderId': folder['id'], 'brandReadsAfterReconnect': len(brand_reads)})
             screenshot('04-brand')
 
-            current = 'ai-unavailable-preserves-draft-without-generation'
+            current = 'ai-disabled-preserves-draft' if args.expect_ai_disabled else 'studio-draft-persists-without-ai-submission'
             page.get_by_role('button', name='开始创作', exact=True).click()
             prompt = page.get_by_label('告诉 AI 你的设计需求')
             prompt.wait_for()
+            page.wait_for_url(re.compile(r'#studio/[^/]+$'))
             before_jobs = api('/jobs')
-            prompt.fill('AI 尚未接入的验收草稿')
-            page.get_by_role('button', name='发送设计需求').click()
-            expect(page.get_by_text('AI 生成尚未接入。需求已保留，你可以添加模板、素材或空白画板继续设计。', exact=True)).to_be_visible()
-            expect(prompt).to_have_value('AI 尚未接入的验收草稿')
+            draft = '非 AI 回归：仅保存这段需求草稿，不发送生成任务'
+            prompt.fill(draft)
+            if args.expect_ai_disabled:
+                report['aiSubmissionAttempted'] = True
+                page.get_by_role('button', name='发送设计需求').click()
+                expect(page.get_by_text('AI 创作尚未配置。需求已保留，你可以添加模板、素材或空白画板继续设计。', exact=True)).to_be_visible()
+            page.keyboard.press('Meta+s' if sys.platform == 'darwin' else 'Control+s')
+            expect(page.locator('.st-board-actions [role=status]')).to_have_text('已保存到工作空间', timeout=20000)
+            studio_id = page.url.split('#studio/')[-1]
+            assert api(f'/projects/{studio_id}/studio')['snapshot']['draft'] == draft
+            page.reload(wait_until='domcontentloaded')
+            expect(prompt).to_have_value(draft)
             assert [j['id'] for j in api('/jobs')] == [j['id'] for j in before_jobs]
-            check(current)
-            screenshot('05-studio-ai-unavailable')
+            check(current, {'aiEnabled': ai_enabled, 'submissionAttempted': bool(args.expect_ai_disabled), 'jobCountUnchanged': True, 'draftRestoredAfterReload': True})
+            screenshot('05-studio-draft')
 
             current = 'logout-and-login-durable-data'
             page.goto(args.base_url + '/#projects', wait_until='domcontentloaded')

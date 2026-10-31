@@ -911,7 +911,17 @@ export default function App({
     // Reconnection replays persisted events. Coalesce that burst before notifying
     // subscribers, each of which may read several workspace resources.
     let workspaceEventTimer;
-    const event = () => {
+    const event = (message) => {
+      if (message?.type === 'job.updated') {
+        try {
+          const payload = JSON.parse(message.data).payload;
+          if (payload?.kind === 'ai.turn') {
+            window.dispatchEvent(new CustomEvent('designx:ai-turn', { detail: payload }));
+            // Token/tool progress must not reload every design in a large project.
+            if (!['succeeded','failed','cancelled'].includes(payload.status)) return;
+          }
+        } catch { /* Normal resource refresh handles non-protocol events. */ }
+      }
       clearTimeout(workspaceEventTimer);
       workspaceEventTimer = setTimeout(refreshWorkspace, 180);
     };

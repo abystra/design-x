@@ -21,6 +21,7 @@ export async function taskRoutes(app:FastifyInstance) {
   if(!['failed','cancelled'].includes(current.status))throw new HttpError(409,'INVALID_JOB_STATE','只有失败或取消的任务可以重试');
   const queueId=id();const job=(await tx.query("UPDATE jobs SET status='queued',progress=0,error=NULL,execution_token=NULL,queue_id=$1,updated_at=now() WHERE id=$2 RETURNING *",[queueId,current.id])).rows[0];
   if(current.kind==='media.ingest'){if(!(await tx.query("UPDATE assets SET status='pending',error=NULL WHERE id=$1 AND deleted_at IS NULL",[current.payload.assetId])).rowCount)notFound();}
+  if(current.kind==='ai.turn')await tx.query("UPDATE ai_turns SET stage='queued',updated_at=now() WHERE id=$1",[current.id]);
   await sendInTransaction(tx,current.kind,{workspaceId:req.identity.workspace.id,jobId:current.id},queueId);
   await emit(tx,req.identity.workspace.id,'job.updated',jobDto(job));return jobDto(job);
  }));

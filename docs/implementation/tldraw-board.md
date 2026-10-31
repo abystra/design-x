@@ -1,5 +1,7 @@
 # tldraw Board 接入与验收
 
+后续 AI 接入的最终构建在性能 smoke 后仅补全数量解析中的中文数字字符、调整开发配置加载优先级并重新通过类型/单元/构建检查；Board 引擎和合并路径未再修改。下文 smoke 的 bundle 标识是实测产物，不将最后一次构建冒充重新测量。
+
 执行日期：2026-10-31。本阶段将 Board 默认引擎替换为固定版本 tldraw 5.6.0；高仿真外壳、三类业务对象、后端协议和精细编辑器保持原有职责。AI 对话仍保留阶段前的未接入状态，后续 AI UI 独立交付。
 
 ## 实际接入边界
@@ -76,3 +78,11 @@ python3 tests/perf/board_performance.py \
 初期运行遇到三类明确问题并保留原报告：SDK 默认 DOM 顺序导致测试首先定位屏外对象，已改为选实际可见对象且保留业务断言；API watch 重启产生非 JSON 500，冻结服务后重跑，没有放宽 HTTP 检查；复制撤销时 SDK 事务内排序缓存与新对象数量不同，已改为按完整期望顺序生成索引，最终 18 项完整通过。SDK overlay 需要 `getIndicatorPath` 的错误也已修复并通过 7 项原生专项。
 
 原始报告、trace、截图与下载产物被 Git 忽略，以上路径是本机证据。此前 Board 性能基线及其失败诊断保留在 [board-performance.md](board-performance.md)；此文不把之前的 Editor/Import/全系统检查重复算作本轮执行。
+
+## AI 接入后的最终生产构建 smoke
+
+主线程完成 AI UI、合并竞态修复和统一格式化后，使用已经构建的 `index-DxZMorN1.js` 于独立 5181 preview 复验 **1 轮**，未重新构建或修改产品源码。报告为 [ai-integrated-final-smoke-20261031-063640](../../tests/perf/.artifacts/ai-integrated-final-smoke-20261031-063640/report.json)，`buildCommit=4073456-ai-integrated-working` 表示包含尚待主线程提交的最终集成源码。本轮无其他浏览器或压测并行，使用同一个 200×50 fixture，不发送 AI 创作请求；这是一轮集成 smoke，不替代上面的三轮独立阶段测量。
+
+六项预算全部通过：初始 20 板 / 3,582 DOM；pan RAF p95 16.7 ms、ScriptDuration 0.736 ms/动作；fit RAF p95 16.8 ms、最大长任务 0。fit 总时长 1.599 s，150 板、70 便签、15 分区完整显示，target=rendered=实际挂载=235、pending=0，固定 1.5 s 后额外检查 7.530 ms。fit 最大 RAF 间隔为 33.3 ms，其他阶段最大 16.8 ms；不把预算通过写成每帧都为 16.8 ms。
+
+本轮首板就绪 804.647 ms、字体/图片就绪 814.267 ms，记录单次观察值，不据此推断稳定加载变化。没有页面异常、HTTP 错误、解码错误或超时，canvas scrollTop/Left 均为 0。实际保存仍为正文 81,921 B、ack 158 B。已查看 [最终截图](../../tests/perf/.artifacts/ai-integrated-final-smoke-20261031-063640/trial-1/board.png)，确认原外壳与真实设计内容保留。测量结束后已关闭 5181 preview；私有测试账号文件交由主线程统一清理。

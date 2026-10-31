@@ -2,6 +2,7 @@ import { pool,tenantTransaction } from '../../../packages/server-infra/src/db.js
 import { startQueue } from '../../../packages/server-infra/src/queue.js';
 import { updateJob } from '../../../packages/server-domain/src/jobs.js';
 import { cleanupImportStaging } from './import-project.js';
+import { reconcileAiAttempts } from './ai-turn.js';
 // Lease expiry is managed by pg-boss. Reconcile business status after the final expired/failed delivery.
 export async function reconcileJobs(){
  const boss=await startQueue();
@@ -25,4 +26,5 @@ export async function reconcileJobs(){
    });
   }
  }
+ await reconcileAiAttempts();
 }

@@ -1,0 +1,115 @@
+.st-agent-progress {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted, #73786f);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.st-agent-progress > span {
+  flex: 1;
+}
+.st-agent-progress > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 8px;
+  border: 1px solid #e4e6df;
+  border-radius: 7px;
+  background: #fff;
+  color: #555c50;
+  font: inherit;
+}
+.st-agent-proposals {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+}
+.st-agent-proposals small {
+  font-size: 11px;
+  color: #8a8f85;
+}
+.st-agent-dialog {
+  width: min(650px, calc(100vw - 40px));
+  max-height: 90vh;
+  border: 1px solid #e2e5dc;
+  border-radius: 18px;
+  padding: 0;
+  background: #fbfcf8;
+  color: #30372b;
+  box-shadow: 0 24px 100px #28321c29;
+}
+.st-agent-dialog::backdrop {
+  background: #20251e66;
+  backdrop-filter: blur(3px);
+}
+.st-agent-dialog header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 22px;
+  border-bottom: 1px solid #e8ebe2;
+}
+.st-agent-dialog header small {
+  color: #8a9281;
+  font-size: 11px;
+}
+.st-agent-dialog h2 {
+  margin: 4px 0 0;
+  font-size: 17px;
+  font-weight: 600;
+}
+.st-agent-dialog header button {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  color: #727c68;
+}
+.st-agent-preview {
+  padding: 20px;
+  background: #eef0e9;
+  max-height: 65vh;
+  overflow: auto;
+}
+.st-agent-preview > .st-design {
+  width: min(100%, 460px);
+  margin: 0 auto;
+  box-shadow: 0 6px 24px #27301b12;
+}
+.st-agent-dialog footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  padding: 16px 22px;
+}
+.st-agent-dialog footer span {
+  font-size: 11px;
+  color: #858d7d;
+}
+.st-agent-dialog footer button {
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 9px;
+  background: #586d35;
+  color: white;
+  font: inherit;
+  font-size: 12px;
+  padding: 10px 15px;
+  cursor: pointer;
+}
+.st-agent-dialog button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+.st-ai-action {
+  margin: 6px 0 0;
+  padding: 5px 8px;
+  border: 1px solid #dde4d3;
+  border-radius: 7px;
+  background: #f4f7ed;
+  color: #607048;
+  font-size: 11px;
+  cursor: pointer;
+}

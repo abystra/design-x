@@ -2,7 +2,7 @@
 
 > 2026-10-31 非 AI 实施补充：当前保留 React/Vite/CSS 与原型 DOM Board，已实现世界坐标空间 hash、视口/预加载边缘裁剪、局部 RAF 手势和轻量 Board 保存，预览继续复用 `doc-render`。本轮未引入 tldraw/rbush，也未迁移路由或状态库；下表仍是架构推荐，不代表依赖均已落地。200 画板固定负载及实际性能边界见 [Board 性能验证](../implementation/board-performance.md)。
 
-> 2026-10-31 选型复评：以 [Part 12](12-tldraw-adoption-review.md) 为本阶段接入依据。下文 `BoardEngine`、逐项 `BoardOp`、`items/frame/z` 与 `board_views` 仍属目标设计，当前代码尚未实现。建议先兼容现有 `results/notes/sections` 和整包 revision/ack 保存，再在内部开关下验证 tldraw；尚未决定默认迁移。
+> 2026-10-31 实施更新：依据 [Part 12](12-tldraw-adoption-review.md) 已完成 tldraw 5.6.0 默认接入及显式 legacy 回退，保留 `results/notes/sections` 与 revision/ack 保存协议。原生交互、业务撤销、200 画板虚拟化实测见 [Board 验收](../implementation/tldraw-board.md)。下文独立 `BoardEngine` 接口、逐项 `BoardOp`、`items/frame/z` 与 `board_views` 仍属后续目标，未因引入 SDK 自动实现。
 
 ## D.1 技术栈选择
 

@@ -38,7 +38,7 @@ export async function projectRoutes(app:FastifyInstance) {
   return tenantTransaction(req.identity.workspace.id,tx=>saveStudio(tx,req.identity.workspace.id,params(req).id,req.body||{},acknowledgeOnly));
  });
  app.post('/api/projects/:id/artboards',async(req:any)=>tenantTransaction(req.identity.workspace.id,async tx=>{
-  const projectId=params(req).id;await getProjectMetadata(tx,projectId);
+  const projectId=params(req).id;await getProjectMetadata(tx,projectId,false,true);
   const body=req.body||{},design=validateDesign(body.design||blankDesign()),title=z.string().trim().min(1).max(200).parse(body.title||'自由画板');
   const position=BoardPositionSchema.parse(body.position||{x:0,y:0});
   const doc=(await tx.query("INSERT INTO documents(id,workspace_id,project_id,kind,title,content) VALUES($1,$2,$3,'artboard',$4,$5) RETURNING *",[id(),req.identity.workspace.id,projectId,title,JSON.stringify(design)])).rows[0];
@@ -49,7 +49,7 @@ export async function projectRoutes(app:FastifyInstance) {
   await emit(tx,req.identity.workspace.id,'artboard.created',{projectId,documentId:doc.id});return {...dto,boardRevision:board.revision};
  }));
  app.patch('/api/projects/:id/artboards/:artboardId',async(req:any)=>tenantTransaction(req.identity.workspace.id,async tx=>{
-  const p=params(req),body=req.body||{};await getProject(tx,p.id);
+  const p=params(req),body=req.body||{};await getProjectMetadata(tx,p.id,false,true);
   const current=(await tx.query("SELECT * FROM documents WHERE id=$1 AND project_id=$2 AND kind='artboard' FOR UPDATE",[p.artboardId,p.id])).rows[0];if(!current)notFound();
   if(body.baseRevision!==current.revision)throw new HttpError(409,'DOC_REVISION_CONFLICT','画板已更新，请重新载入');
   const design=validateDesign(body.design||current.content);await syncAssetRefs(tx,req.identity.workspace.id,current.id,design);
@@ -68,7 +68,7 @@ export async function projectRoutes(app:FastifyInstance) {
   const name=z.string().trim().min(1).max(120).parse(body.name||'命名版本');await saveVersion(tx,req.identity.workspace.id,doc,name);return {ok:true};
  }));
  app.post('/api/projects/:id/versions/:versionId/restore',async(req:any)=>tenantTransaction(req.identity.workspace.id,async tx=>{
-  const p=params(req),project=await getProject(tx,p.id);
+  const p=params(req),project=await getProject(tx,p.id,false,true);
   const version=(await tx.query('SELECT * FROM document_versions WHERE id=$1 AND project_id=$2',[p.versionId,p.id])).rows[0];if(!version)notFound();
   const current=(await tx.query('SELECT * FROM documents WHERE id=$1 FOR UPDATE',[version.document_id])).rows[0];
   const doc=(await tx.query('UPDATE documents SET content=$1,revision=revision+1,updated_at=now() WHERE id=$2 RETURNING *',[JSON.stringify(version.content),version.document_id])).rows[0];

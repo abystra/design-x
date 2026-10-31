@@ -43,7 +43,14 @@ import {
   FileArchive,
 } from "lucide-react";
 import catalog from "../data/catalog.json";
-import { api, uploadAsset, waitForJob } from "../lib/api";
+import { api, uploadAsset, waitForJob, refreshWorkspace } from "../lib/api";
+import { useAiTurns } from "../lib/useAiTurns";
+import { resolveAiCount } from "../lib/ai-request";
+import {
+  mergeAiBoardSnapshots,
+  rebaseAiBoardHistory,
+} from "../lib/ai-board-merge";
+import AgentTurns from "./AgentTurns";
 import {
   boardItems,
   boardItemSize,
@@ -185,8 +192,17 @@ export default function AIStudio({
 }) {
   const snap = session.snapshot || {};
   const projectId = session.projectId || session.id;
+  const agent = useAiTurns(projectId);
+  const acceptedTurns = useRef(new Set());
+  const receiving = useRef(false);
+  const receiveTimer = useRef();
+  const receiveDelay = useRef(2000);
+  const [receiveRetry, retryReceive] = useState(0);
+  const submitting = useRef(false);
   const [boardEngine] = useState(() =>
-    new URLSearchParams(typeof window === "undefined" ? "" : window.location.search).get("boardEngine") === "legacy"
+    new URLSearchParams(
+      typeof window === "undefined" ? "" : window.location.search,
+    ).get("boardEngine") === "legacy"
       ? "legacy"
       : "tldraw",
   );
@@ -472,6 +488,7 @@ export default function AIStudio({
       finishGesture({ render: false });
       mounted.current = false;
       clearTimeout(saveTimer.current);
+      clearTimeout(receiveTimer.current);
       window.removeEventListener("beforeunload", warn);
       window.removeEventListener("blur", blur);
       document.removeEventListener("visibilitychange", visibility);
@@ -483,7 +500,53 @@ export default function AIStudio({
       top: chat.current.scrollHeight,
       behavior: "smooth",
     });
-  }, [messages]);
+  }, [messages, agent.turns]);
+  useEffect(() => {
+    if (receiving.current) return;
+    const completed = agent.turns.filter(
+      (turn) =>
+        turn.mode === "create" &&
+        turn.status === "succeeded" &&
+        !acceptedTurns.current.has(turn.id),
+    );
+    if (!completed.length) return;
+    // Reopening an already hydrated workspace needs no full-document reload.
+    const incoming = completed.filter(
+      (turn) => (turn.boardRevision || 0) > revision.current,
+    );
+    completed
+      .filter((turn) => !incoming.includes(turn))
+      .forEach((turn) => acceptedTurns.current.add(turn.id));
+    if (!incoming.length) return;
+    receiving.current = true;
+    receiveAiResults()
+      .then(() => {
+        incoming.forEach((turn) => acceptedTurns.current.add(turn.id));
+        receiveDelay.current = 2000;
+      })
+      .catch((failure) => {
+        if (!mounted.current) return;
+        if (
+          conflict.current ||
+          (failure.status && failure.status < 500 && failure.status !== 429)
+        ) {
+          // A real conflict needs explicit recovery; never discard the local draft.
+          incoming.forEach((turn) => acceptedTurns.current.add(turn.id));
+        } else {
+          // A transient read failure must not permanently hide completed results.
+          clearTimeout(receiveTimer.current);
+          receiveTimer.current = setTimeout(
+            () => retryReceive((n) => n + 1),
+            receiveDelay.current,
+          );
+          receiveDelay.current = Math.min(30000, receiveDelay.current * 2);
+        }
+        setError(failure.message);
+      })
+      .finally(() => {
+        receiving.current = false;
+      });
+  }, [agent.turns, receiveRetry]);
   useEffect(() => {
     let active = true;
     const load = async () => {
@@ -732,10 +795,21 @@ export default function AIStudio({
         return;
       }
       if (editing) return;
-      if (nativeBoard && (
-        ["Escape", "Delete", "Backspace", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key) ||
-        ((e.metaKey || e.ctrlKey) && ["a", "z", "d"].includes(e.key.toLowerCase()))
-      )) e.stopImmediatePropagation();
+      if (
+        nativeBoard &&
+        ([
+          "Escape",
+          "Delete",
+          "Backspace",
+          "ArrowLeft",
+          "ArrowRight",
+          "ArrowUp",
+          "ArrowDown",
+        ].includes(e.key) ||
+          ((e.metaKey || e.ctrlKey) &&
+            ["a", "z", "d"].includes(e.key.toLowerCase())))
+      )
+        e.stopImmediatePropagation();
       if (e.key === "Escape") {
         finishGesture();
         setPanel(null);
@@ -912,10 +986,181 @@ export default function AIStudio({
       y: height / 2 - ((height / 2 - value.y) * zoom) / value.zoom,
     });
   }
-  function generate() {
-    setError(
-      "AI 生成尚未接入。需求已保留，你可以添加模板、素材或空白画板继续设计。",
+  async function receiveAiResults() {
+    clearTimeout(saveTimer.current);
+    return enqueue(async () => {
+      const remote = await api(`/projects/${projectId}/studio`);
+      // A gesture may start while GET is in flight. Let it finish naturally
+      // before adding shapes, so the old SDK store cannot drop incoming items.
+      while (
+        mounted.current &&
+        (drag.current || world.current?.isInteracting?.())
+      )
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      if (!mounted.current) return;
+      finishGesture();
+      clearTimeout(saveTimer.current);
+      const base = JSON.parse(savedJson.current);
+      const normalizedRemote = { ...base, ...remote.snapshot };
+      let merged;
+      try {
+        merged = mergeAiBoardSnapshots(
+          base,
+          latest.current,
+          normalizedRemote,
+        ).snapshot;
+      } catch (failure) {
+        conflict.current = true;
+        setConflicted(true);
+        setSaveError(failure.message);
+        setSaveState("error");
+        throw failure;
+      }
+      history.current = rebaseAiBoardHistory(
+        history.current,
+        base,
+        normalizedRemote,
+      );
+      renderHistory((n) => n + 1);
+      revision.current = remote.revision;
+      // Acknowledge only the server state, never unsaved local edits we merged in.
+      savedJson.current = JSON.stringify(persistedSnapshot(normalizedRemote));
+      savedSnapshot.current = merged;
+      conflict.current = false;
+      setConflicted(false);
+      setSaveError("");
+      updateBoard(merged);
+      setTitle(merged.title);
+      setMessages(merged.messages || []);
+      setDraft(merged.draft || "");
+      setSkill(merged.skill || null);
+      setMode(merged.mode || "Agent");
+      setAssets(merged.assets || []);
+      setAttached(merged.attached || []);
+      setRatio(merged.ratio || "自动");
+      setCount(merged.count || "自动");
+      setSelected(merged.selected || null);
+      setSelection(merged.selection || []);
+      setReference(merged.reference || null);
+      liveView.current = merged.view;
+      setView(merged.view);
+      latest.current = merged;
+      // Continue through the same save queue so no gesture/draft change is lost.
+      savedSnapshot.current = {};
+      await saveNow();
+      setError("");
+      return merged;
+    });
+  }
+  async function locateAiTurn(turn) {
+    if ((turn.boardRevision || 0) > revision.current) await receiveAiResults();
+    fit(
+      latest.current.results.filter((result) =>
+        turn.artboardIds.includes(result.id),
+      ),
     );
+    setPanel(null);
+    setMobileView("canvas");
+  }
+  async function applyAiProposal(turn, proposal) {
+    await flush();
+    const response = await agent.apply(
+      turn,
+      proposal.id,
+      turn.appliedRevision || turn.baseRevision,
+    );
+    updateResults(
+      latest.current.results.map((result) =>
+        result.id === response.artboard.id
+          ? { ...result, ...response.artboard, position: result.position }
+          : result,
+      ),
+    );
+    refreshWorkspace();
+    onToast?.("修改方案已应用，原版本已保留");
+  }
+  async function generate() {
+    if (submitting.current || busy || uploading || conflicted || !draft.trim())
+      return;
+    if (!agent.enabled) {
+      setError(
+        "AI 创作尚未配置。需求已保留，你可以添加模板、素材或空白画板继续设计。",
+      );
+      return;
+    }
+    if (mode !== "Agent") {
+      setError("当前支持 Agent 可编辑设计创作，图片与视频生成尚未开放。");
+      return;
+    }
+    const prompt = draft.trim();
+    let amount;
+    try {
+      amount = resolveAiCount(count, prompt);
+    } catch (failure) {
+      setError(failure.message);
+      return;
+    }
+    if (attached.length > 3) {
+      setError("每次最多添加 3 张参考图片，请减少素材后重试。");
+      return;
+    }
+    submitting.current = true;
+    setBusy(true);
+    setError("");
+    try {
+      const resolved = [];
+      for (const asset of attached) {
+        if (asset.assetId) {
+          resolved.push(asset);
+          continue;
+        }
+        const source = STOCK.find((item) => item.url === asset.url);
+        if (!source) throw new Error("参考素材不可用，请从资产库重新添加。");
+        const response = await fetch(source.url);
+        if (!response.ok) throw new Error("参考图片读取失败");
+        const ready = await uploadAsset(
+          new File([await response.blob()], `${source.name}.jpg`, {
+            type: "image/jpeg",
+          }),
+        );
+        resolved.push({
+          ...asset,
+          id: ready.id,
+          assetId: ready.id,
+          url: ready.image,
+        });
+      }
+      if (resolved.some((item, index) => item !== attached[index])) {
+        setAttached(resolved);
+        latest.current = { ...latest.current, attached: resolved };
+      }
+      await flush();
+      const target = referenceResult;
+      const document = target
+        ? await api(`/documents/${target.documentId || target.id}`)
+        : null;
+      await agent.start({
+        prompt,
+        count: amount,
+        ratio,
+        mode: target ? "revise" : "create",
+        baseBoardRevision: revision.current,
+        referenceDocumentIds: target ? [target.documentId || target.id] : [],
+        assetIds: resolved.map((asset) => asset.assetId),
+        ...(target
+          ? { targetDocumentId: document.id, baseRevision: document.revision }
+          : {}),
+      });
+      if (mounted.current) {
+        setDraft((value) => (value.trim() === prompt ? "" : value));
+        setPopover(null);
+      }
+    } catch (failure) {
+      if (mounted.current) setError(failure.message);
+    } finally {
+      submitting.current = false;
+      if (mounted.current) setBusy(false);
+    }
   }
   function referenceDesign(r) {
     setSelected(r.id);
@@ -1445,7 +1690,7 @@ export default function AIStudio({
           </div>
         </div>
         <div className="st-conversation" ref={chat}>
-          {!messages.length ? (
+          {!messages.length && !agent.turns.length ? (
             <div className="st-greeting">
               <span className="st-greeting-symbol">✳</span>
               <h1>你好，让灵感发生。</h1>
@@ -1539,6 +1784,12 @@ export default function AIStudio({
                   )}
                 </article>
               ))}
+              <AgentTurns
+                agent={agent}
+                onLocate={locateAiTurn}
+                onApply={applyAiProposal}
+                onError={setError}
+              />
             </div>
           )}
         </div>
@@ -1547,7 +1798,7 @@ export default function AIStudio({
             <div className="st-reference">
               <img src={referenceResult.image} alt="" />
               <span>
-                基于此方案继续<small>{referenceResult.title}</small>
+                修改此方案 · 先预览再应用<small>{referenceResult.title}</small>
               </span>
               <IconButton
                 label="取消引用方案"
@@ -1654,7 +1905,7 @@ export default function AIStudio({
                 onChange={(e) => setCount(e.target.value)}
               >
                 <option value="自动">数量自动</option>
-                {[1, 2, 3, 4, 6].map((n) => (
+                {[1, 2, 3].map((n) => (
                   <option key={n} value={n}>
                     {n} 个方案
                   </option>
@@ -1700,10 +1951,20 @@ export default function AIStudio({
               </button>
               <button
                 className="st-send"
-                disabled={!draft.trim()}
+                disabled={
+                  !draft.trim() ||
+                  busy ||
+                  uploading ||
+                  conflicted ||
+                  agent.submitting
+                }
                 onClick={generate}
                 aria-label="发送设计需求"
-                title="AI 生成尚未接入，需求会保留为草稿"
+                title={
+                  agent.enabled
+                    ? "开始创作可编辑设计"
+                    : "AI 尚未配置，需求会保留为草稿"
+                }
               >
                 <ArrowUp size={18} />
               </button>
@@ -1717,6 +1978,7 @@ export default function AIStudio({
                 ].map(([m, I, t]) => (
                   <button
                     key={m}
+                    disabled={m !== "Agent"}
                     onClick={() => {
                       setMode(m);
                       setPopover(null);
@@ -1725,7 +1987,7 @@ export default function AIStudio({
                     <I size={16} />
                     <span>
                       {m}
-                      <small>{t}</small>
+                      <small>{m === "Agent" ? t : "尚未开放"}</small>
                     </span>
                     {mode === m && <Check size={14} />}
                   </button>
@@ -1768,13 +2030,17 @@ export default function AIStudio({
               </div>
             )}
           </div>
-          {(error || libraryError) && (
+          {(error || agent.error || libraryError) && (
             <p className="st-error" role="alert">
-              {error || libraryError}
+              {error || agent.error || libraryError}
             </p>
           )}
           <div className="st-composer-footnote">
-            <span>需求自动保存 · AI 能力稍后开放</span>
+            <span>
+              {agent.enabled
+                ? "需求自动保存 · 生成可编辑方案"
+                : "需求自动保存 · AI 尚未配置"}
+            </span>
             <span>Shift ↵ 换行</span>
           </div>
         </div>

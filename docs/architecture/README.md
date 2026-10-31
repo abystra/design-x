@@ -4,11 +4,11 @@
 
 ## 当前实施顺序与新增决策（2026-10-31）
 
-先沿用已有高仿真原型，落实非 AI 前后端链路：个人空间、项目、素材、Board/Artboard、文档保存、异步处理与导出。AI 入口必须如实显示尚未接入；本阶段不执行模型、Harness 或 Sandbox。
+已沿用高仿真原型落实个人空间、项目、素材、Board/Artboard、文档保存、异步处理与导出。用户随后授权接入 tldraw 与真实 AI；当前默认 Board 引擎为 tldraw 5.6.0，Agent 入口按服务端 `AI_ENABLED` 开关开放。
 
-最终 AI 执行架构已由用户明确为 **E2B Sandbox 内的 Harness 使用 Codex SDK**，替代原稿的自研轻量 Agent loop。API、Worker、Renderer、PostgreSQL、pg-boss、S3 兼容存储及产品拥有的 Creative Document 保持不变。业务权限、任务与成果持久化由控制面负责；沙箱只能通过受限业务工具/API 提交请求，不能直连数据库。详见 [ADR-0001](../adr/0001-codex-e2b.md) 和 Part 5 §E.4.3。
+最终 AI 执行架构已由用户明确为 **E2B Sandbox 内的 Harness 使用 Codex SDK，模型为 DeepSeek**，替代原稿的自研轻量 Agent loop。API、Worker、Renderer、PostgreSQL、pg-boss、S3 兼容存储及产品拥有的 Creative Document 保持不变。业务权限、任务与成果持久化由控制面负责；当前 Harness 写出文件 manifest，由 Worker 校验并提交，沙箱不能直连数据库。详见 [ADR-0001](../adr/0001-codex-e2b.md) 和 Part 5 §E.4.3。
 
-本次仅核对相关官方文档并更新设计；**未实现、运行或验证 Codex/E2B 集成**。以下完整 MVP/AI 用户旅程是后续目标，不能当作本轮完成状态。2026-10-31 另完成 [tldraw 接入复评](12-tldraw-adoption-review.md)，核对 SDK 官方资料及现有 Board 差异；建议先验证再决定切换，尚未安装 SDK。其余原稿的第三方版本、许可与区域假设未因此重新核查。
+真实模板、SDK 两轮工具执行与文件回收见 [运行时验证](../implementation/ai-runtime.md)，tldraw 原生交互及 200 画板性能见 [Board 验收](../implementation/tldraw-board.md)，当前产品链路与边界见 [AI 创作实现](../implementation/ai-creation.md)。以下完整 MVP 仍包含未实施的配方、多人协作、图片/视频模型和计费目标，不能当作全部交付；其余原稿的许可与区域假设未因此重新核查。
 
 本目录是 Design-X 的实施导向架构方案，供团队估算、计划、建设和验证使用。正文用简体中文，技术术语、标识符和代码示例保留英文。
 

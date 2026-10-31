@@ -323,7 +323,7 @@ def main():
                 page.get_by_role('navigation', name='主导航').get_by_role('button', name='我的项目', exact=True).click()
                 page.get_by_role('button', name='打开作品 ' + project['title'], exact=True).click()
                 expect(page.locator('.ai-studio')).to_be_visible()
-                assert page.url.endswith('#studio/' + pid), page.url
+                expect(page).to_have_url(args.base_url + '/#studio/' + pid)
                 expect(page.locator('.st-result')).to_have_count(0)
                 expect(page.locator('.st-note')).to_have_count(0)
                 expect(page.locator('.st-section')).to_have_count(0)

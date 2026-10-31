@@ -14,7 +14,8 @@ import { libraryRoutes } from './library.js';
 import { mediaRoutes } from './media.js';
 import { documentRoutes } from './documents.js';
 import { taskRoutes } from './tasks.js';
-export async function buildApp(options:{logger?:boolean}={}) {
+import { aiRoutes } from './ai.js';
+export async function buildApp(options:{logger?:boolean,aiEnabled?:boolean}={}) {
  const app=Fastify({logger:options.logger??true,bodyLimit:6*1024*1024,trustProxy:false});
  await app.register(cookie);
  await app.register(multipart,{limits:{fileSize:config.maxUploadBytes,files:1,fields:3}});
@@ -34,11 +35,12 @@ export async function buildApp(options:{logger?:boolean}={}) {
   if(status>=500)req.log.error(error);
   reply.code(status).send({error:error instanceof HttpError?error.code:status>=500?'INTERNAL_ERROR':error.code||'BAD_REQUEST',message:status>=500?'服务暂时不可用，请稍后重试':error.message});
  });
- app.get('/api/health',async()=>{await pool.query('SELECT 1');return {status:'ok',aiEnabled:false};});
+ app.get('/api/health',async()=>{await pool.query('SELECT 1');return {status:'ok',aiEnabled:options.aiEnabled??config.aiEnabled};});
  await app.register(authRoutes);
  await app.register(async privateApi=>{
   privateApi.addHook('preHandler',requireIdentity);
   await privateApi.register(importRoutes);await privateApi.register(projectRoutes);await privateApi.register(documentRoutes);await privateApi.register(libraryRoutes);await privateApi.register(mediaRoutes);await privateApi.register(taskRoutes);
+  await privateApi.register(aiRoutes,{enabled:options.aiEnabled??config.aiEnabled});
  });
  await startQueue();
  return app;

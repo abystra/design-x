@@ -3,14 +3,14 @@ import { BoardSchema } from '../../doc-core/src/board.js';
 import { z } from 'zod';
 import type { Tx } from '../../server-infra/src/db.js';
 import { id, blankDesign, validateDesign, syncAssetRefs, saveVersion, emit, HttpError, notFound } from './common.js';
-export async function getProject(tx:Tx,projectId:string,includeDeleted=false) {
- return readProject(tx,projectId,includeDeleted,true);
+export async function getProject(tx:Tx,projectId:string,includeDeleted=false,lock=false) {
+ return readProject(tx,projectId,includeDeleted,true,lock);
 }
-export async function getProjectMetadata(tx:Tx,projectId:string,includeDeleted=false) {
- return readProject(tx,projectId,includeDeleted,false);
+export async function getProjectMetadata(tx:Tx,projectId:string,includeDeleted=false,lock=false) {
+ return readProject(tx,projectId,includeDeleted,false,lock);
 }
-async function readProject(tx:Tx,projectId:string,includeDeleted:boolean,includeDesign:boolean) {
- const {rows}=await tx.query(`SELECT p.*, ${includeDesign?'d.content AS design,':''}d.revision,d.id as document_id FROM projects p LEFT JOIN documents d ON d.id=p.primary_artboard_id WHERE p.id=$1 ${includeDeleted?'':'AND p.deleted_at IS NULL'}`,[projectId]);
+async function readProject(tx:Tx,projectId:string,includeDeleted:boolean,includeDesign:boolean,lock=false) {
+ const {rows}=await tx.query(`SELECT p.*, ${includeDesign?'d.content AS design,':''}d.revision,d.id as document_id FROM projects p LEFT JOIN documents d ON d.id=p.primary_artboard_id WHERE p.id=$1 ${includeDeleted?'':'AND p.deleted_at IS NULL'} ${lock?'FOR UPDATE OF p':''}`,[projectId]);
  if(!rows[0])notFound();return rows[0];
 }
 export function projectDto(p:any) {return {id:p.id,projectId:p.id,documentId:p.document_id,title:p.title,type:p.type,image:p.image,color:p.color,folderId:p.folder_id,design:p.design,revision:p.revision,persisted:true,updatedAt:p.updated_at,createdAt:p.created_at,lastOpenedAt:p.last_opened_at?new Date(p.last_opened_at).getTime():0,deletedAt:p.deleted_at};}
@@ -58,7 +58,8 @@ async function hydrateStudio(tx:Tx,projectId:string,board:any) {
  return {snapshot:{...board.content,results},revision:board.revision};
 }
 export async function saveStudio(tx:Tx,workspaceId:string,projectId:string,input:any,acknowledgeOnly=false) {
- await getProjectMetadata(tx,projectId);
+ // Every Board/document mutation locks the project before its documents.
+ await getProjectMetadata(tx,projectId,false,true);
  const board=(await tx.query("SELECT * FROM documents WHERE project_id=$1 AND kind='board' FOR UPDATE",[projectId])).rows[0];
  if(!board)notFound();
  if(input.baseRevision!==board.revision)throw new HttpError(409,'DOC_REVISION_CONFLICT','工作区已更新，请刷新后重试');

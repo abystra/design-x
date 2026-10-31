@@ -23,6 +23,7 @@ export async function documentRoutes(app:FastifyInstance){
  }));
  app.post('/api/documents/:id/ops',async(req:any)=>tenantTransaction(req.identity.workspace.id,async tx=>{
   const body=z.object({baseRevision:z.number().int().min(1),clientOpId:z.string().min(1).max(200),ops:opsSchema}).parse(req.body);
+  if(!(await tx.query("SELECT p.id FROM projects p JOIN documents d ON d.project_id=p.id WHERE d.id=$1 AND d.kind='artboard' AND p.deleted_at IS NULL FOR UPDATE OF p",[req.params.id])).rowCount)notFound();
   const doc=(await tx.query("SELECT d.* FROM documents d JOIN projects p ON p.id=d.project_id WHERE d.id=$1 AND p.deleted_at IS NULL AND d.kind='artboard' FOR UPDATE OF d",[req.params.id])).rows[0];if(!doc)notFound();
   const previous=(await tx.query('SELECT revision,ops FROM document_ops WHERE document_id=$1 AND client_op_id=$2',[doc.id,body.clientOpId])).rows[0];
   if(previous){if(canonical(previous.ops)!==canonical(body.ops))throw new HttpError(409,'IDEMPOTENCY_KEY_REUSED','操作标识已使用');return {documentId:doc.id,revision:previous.revision};}

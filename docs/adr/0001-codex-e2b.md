@@ -1,9 +1,9 @@
 # ADR-0001：E2B Sandbox 内 Harness 使用 Codex SDK
 
 - 日期：2026-10-31
-- 状态：**Accepted（用户明确决策）；集成未实现、未运行验证**
+- 状态：**Accepted（用户明确决策）；真实运行与首个产品创作链路已实施**
 - 替代：原 AD-08/D-08 自研轻量 Agent loop、原 D-09 拒绝 E2B/Codex 的结论
-- 当前阶段：先实现非 AI 系统链路，此 ADR 不表示 AI 已交付
+- 当前阶段：非 AI 基础上接入 tldraw 与 Agent 创作；具体已验收范围见 [实施记录](../implementation/ai-creation.md)
 
 ## 决策
 
@@ -39,9 +39,11 @@ Codex 认证经受控配置或代理提供，兼容方式在 AI 阶段验证；�
 
 工具桥接可采用受限 HTTP/MCP，流事件/取消/审批映射由 Harness 适配；本 ADR 不声明尚未核实的 SDK 方法。OpenAI 官方也将处理认证、历史、审批和流事件的自定义客户端列为 app-server 使用场景；当前 SDK 路线保持不变，若选定版本无法满足必要能力，记录差距后再决策，不静默改换宿主。
 
-## 当前阶段与后续验收
+## 当前实现与后续验收
 
-本阶段建设真实非 AI 项目、素材、文档、任务与导出闭环，只预留 AI 契约和能力开关。不创建收费沙箱，不调用模型，不以 fake 作为 AI 完成证据。
+2026-10-31 已按后续用户授权运行收费 E2B 沙箱和 DeepSeek，固定 `e2b@2.62.0`、`@openai/codex-sdk@0.166.0`、模板 `u1yrkaokyjzef8qchho5`。产品 Worker 按回合创建沙箱，Harness 通过真实工具写 manifest；控制面校验、创建画板或保留修改提案，用户应用时执行版本 CAS。当前没有向沙箱暴露业务 API/MCP；上述工具桥接仍是扩展设计。
+
+当前数据库使用 `ai_turns` 和 `ai_attempts`，后者关联 execution token、sandbox/thread、deadline、usage 和清理状态。E2B 出站代理仅对 DeepSeek 注入模型凭证，沙箱进程只有占位值。取消/超时/fence 失效拒绝成果，创建结果不确定时按 runKey 对账。产品会话从已授权文档构造新回合，不声称跨沙箱恢复 SDK thread。详细边界与实际证据见实施记录。
 
 AI 阶段需固定 SDK/runtime/template 版本，验证真实账号和部署区域可用性、受限工具、事件去重、跨租户拒绝、Worker 重启、沙箱丢失、检查点恢复、取消与迟到结果、预算中止、凭证轮换及成果摄取。计入沙箱时间、模型和存储成本。原 China-first 控制面假设不代表 E2B/Codex 已满足对应部署或数据地域要求。
 
