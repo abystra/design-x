@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "verify:ai-runtime": "node --env-file=.env.ai.local --import tsx scripts/verify-ai-runtime.ts",
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
@@ -37,7 +38,9 @@
     "@fastify/rate-limit": "^11.2.1",
     "@fontsource-variable/noto-sans-sc": "^5.3.1",
     "@fontsource-variable/source-serif-4": "^5.3.1",
+    "@openai/codex-sdk": "0.166.0",
     "drizzle-orm": "^0.45.4",
+    "e2b": "2.62.0",
     "fastify": "^5.12.7",
     "lucide-react": "^0.468.0",
     "pg": "^8.23.1",
