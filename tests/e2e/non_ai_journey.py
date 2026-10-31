@@ -177,6 +177,9 @@ def main() -> int:
             current = 'folders-and-brand-persist'
             page.get_by_role('button', name='返回工作区').click()
             nav('我的项目')
+            project_preview = page.get_by_role('img', name=title + '预览', exact=True)
+            expect(project_preview).to_be_visible()
+            expect(project_preview).to_contain_text('真实保存 · 秋日上新')
             page.get_by_role('button', name='新建文件夹', exact=True).click()
             folder_name = f'验收文件夹 {run_id[-6:]}'
             page.get_by_label('文件夹名称').fill(folder_name)

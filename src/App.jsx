@@ -45,6 +45,7 @@ import Workspace from "./components/Workspace.jsx";
 import { api, uploadAsset, refreshWorkspace } from "./lib/api";
 import { initialDesign } from "./components/Editor.jsx";
 import JobPanel from "./components/JobPanel.jsx";
+import DesignThumbnail from "./components/DesignThumbnail.jsx";
 import Catalog from "./components/Catalog.jsx";
 import Workbench from "./components/Workbench.jsx";
 import AIStudio from "./components/AIStudio.jsx";
@@ -560,7 +561,15 @@ function HomePage({
         <div className="home-projects">
           {projects.slice(0, 3).map((p) => (
             <button key={p.id} onClick={() => onProject(p)}>
-              <img src={p.image} />
+              {p.design ? (
+                <DesignThumbnail
+                  design={p.design}
+                  title={p.title}
+                  style={{ width: 60, height: 44, borderRadius: 5 }}
+                />
+              ) : (
+                <img src={p.image} alt={p.title} />
+              )}
               <div>
                 <h3>{p.title}</h3>
                 <span>
@@ -572,7 +581,7 @@ function HomePage({
           ))}
           <button className="blank-project" onClick={onCreate}>
             <Plus />
-            <span>开启新的 AI 创作</span>
+            <span>开启新的创作</span>
           </button>
         </div>
       </section>
@@ -695,16 +704,16 @@ function TemplatesPage({ onSelect, favorites, toggleFavorite }) {
 function Guide({ onNavigate }) {
   return (
     <div className="guide-page">
-      <span className="eyebrow">DESIGN X · PRODUCT BLUEPRINT</span>
+      <span className="eyebrow">DESIGN X · CREATIVE GUIDE</span>
       <h1>一个想法，走完创作的全程。</h1>
       <p className="lead">
         以任务为中心组织能力，以可编辑的作品承接结果，以资产复用延续创作。
       </p>
       <div className="flow-guide">
         {[
-          ["01", "提出想法", "自然语言 / 模板 / 技能"],
-          ["02", "明确方案", "素材 / 风格 / 规格"],
-          ["03", "生成预览", "进度 / 取消 / 重试"],
+          ["01", "开始创作", "空白画板 / 模板"],
+          ["02", "添加素材", "图片 / 品牌 / 参考"],
+          ["03", "组织画布", "画板 / 排列 / 分组"],
           ["04", "打磨设计", "画布 / 文字 / 元素"],
           ["05", "保存与复用", "导出 / 项目 / 资产"],
         ].map(([n, t, s]) => (
@@ -719,9 +728,9 @@ function Guide({ onNavigate }) {
       <div className="guide-columns">
         <section>
           <h2>先体验这三条路径</h2>
-          <button onClick={() => onNavigate("product-demo")}>
+          <button onClick={() => onNavigate("projects")}>
             <ShoppingBag />
-            商品套图工作流 <ArrowUpRight />
+            项目管理与版本延续 <ArrowUpRight />
           </button>
           <button onClick={() => onNavigate("templates")}>
             <PanelsTopLeft />
@@ -735,15 +744,15 @@ function Guide({ onNavigate }) {
         <section>
           <h2>当前创作能力</h2>
           <p>
-            65 个技能与 35
-            个工具依据资料组织为统一目录；商品套图、营销海报和画布编辑为深度交互样板，其他场景提供对应配置与交付结构预览。
+            从模板或空白画板开始，上传素材并调整文字、图片和图层。保存后可以继续编辑、恢复历史版本，或导出图片和
+            PDF。
           </p>
           <p>
             模板、画布编辑、项目、素材和导出已连接个人空间。AI
             生成能力暂未接入；可以先使用模板或自由画板开始创作。
           </p>
           <span className="guide-note">
-            参考资料与设计规格已保存在项目 docs 目录。
+            修改会自动保存。离线时请保留当前浏览器，联网后完成同步。
           </span>
         </section>
       </div>
@@ -1144,7 +1153,7 @@ export default function App({
                   </button>
                   <span className="prototype-badge">
                     <span />
-                    交互原型
+                    创作空间
                   </span>
                   <button
                     className="icon-button notification-toggle"

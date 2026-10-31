@@ -1,0 +1,15 @@
+.dx-design-thumbnail {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.dx-design-thumbnail .dx-node-image {
+  border-radius: 0 !important;
+  transform: none !important;
+  transition: none !important;
+}
+.dx-design-thumbnail .dx-document-node > svg {
+  margin: 0;
+}

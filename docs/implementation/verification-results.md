@@ -2,6 +2,27 @@
 
 执行日期：2026-10-31（America/Los_Angeles）。本记录只陈述实际运行的测试，不代表生产部署、全部架构目标或 AI 集成已经完成。
 
+交付基线：阶段 1 `44fcd0e`、阶段 2 `ead7d15`。API、编辑器与渲染专项以阶段 2 的业务实现为基线；完整浏览器旅程在阶段 3 项目缩略图改用共享渲染后再次执行。后续新增的验收脚本和说明以最终提交为准。
+
+## 工程检查
+
+最终执行 `pnpm typecheck`、`pnpm check`、`pnpm test:unit`、`pnpm build` 均通过；单元测试 7 项详情见下文。`pnpm install --frozen-lockfile --ignore-scripts` 成功，证明当前 pnpm 锁文件与清单对齐；该命令不代表全新机器的原生依赖安装与启动验证。
+
+Web 构建仍有单个 JavaScript 包约 541 kB 的体积提示，以及 Zod 上游纯函数注释位置提示，未阻断构建。拆包和加载性能需要后续按真实负载优化。
+
+## 真实 API / Worker / Renderer 回归
+
+实际命令：`node --import tsx --test --test-concurrency=1 apps/api/tests/*.test.ts`，现已提供等价入口 `pnpm test:api`。
+
+后端验证者最终执行结果：**15/15 通过，0 失败，耗时 10.14 秒**，本次无需业务代码修复。覆盖 core 6 项、media 3 项、safety 6 项。运行前停止本项目长期 Worker/Renderer，API/Web 保持；媒体测试自行启动独立后台子进程，使用实际 PostgreSQL、SeaweedFS 与 Chromium。
+
+- 注册/登录/注销、持久化会话、空间隔离、项目/版本/Board/文件夹/偏好保存与恢复。
+- 业务写入与入队的事务回滚、文档操作与逆向历史、非法素材来源拒绝。
+- 过期执行 fencing、并发导出重试幂等、软删后的文件/任务访问边界、历史版本与品牌素材引用保护。
+- 实际图片上传与摄取、Renderer 离线期间保留任务、排队任务取消；PNG、JPEG、WebP、PDF、SVG、`.dxproj` 均生成实际产物。
+
+这些用例验证了明确的故障场景和格式输出，不涵盖任意进程终止点、对象存储丢失、完整灾难恢复或 SVG 在第三方编辑器中的兼容性。
+
 ## 文档核心单元测试
 
 命令：`pnpm test:unit`
@@ -14,14 +35,14 @@
 
 命令：`python3 tests/e2e/non_ai_journey.py`
 
-最终运行 ID：`20261031-025327-b2c6be`。使用实际 Web 5173、API 3001、PostgreSQL、SeaweedFS、media worker 与 Chromium renderer；**无 HTTP mock，未使用 `--skip-exports`**。
+最终运行 ID：`20261031-030639-e0cb55`。使用实际 Web 5173、API 3001、PostgreSQL、SeaweedFS、media worker 与 Chromium renderer；**无 HTTP mock，未使用 `--skip-exports`**。
 
 结果：**11/11 检查通过**，未捕获页面运行异常 0 条、HTTP 5xx 0 条。
 
 | 检查 | 实际结果 |
 |---|---|
 | 注册与个人空间 | 真实账户创建、会话可读、Cookie 为 HttpOnly |
-| 模板编辑与保存 | 实例化模板、修改中文文字和名称；清空 localStorage 后刷新，内容与服务端一致 |
+| 模板编辑与保存 | 实例化模板、修改中文文字和名称；清空 localStorage 后刷新，内容与服务端一致（该步 revision 2）；项目卡片预览包含真实已保存文字 |
 | 上传与素材摄取 | Worker 处理至 ready；私有素材读取 987,434 字节；设计存储真实 asset 引用 |
 | 命名版本与恢复 | 保存命名版本，修改文字后恢复；文档内容与基准一致 |
 | PNG 导出 | 真实下载 543,591 字节，PNG 签名有效，600 × 800 像素；任务 succeeded |
@@ -32,20 +53,70 @@
 | 跨账户隔离 | 第二账号对他人项目/Board/版本/素材/缩略图/导出读取及项目修改返回 404；品牌为空，页面不显示他人作品 |
 | 运行错误检查 | 无未捕获页面异常、无 HTTP 5xx |
 
-本机证据在 `tests/e2e/.artifacts/20261031-025327-b2c6be/`，该目录被 Git 忽略：
+本机证据在 `tests/e2e/.artifacts/20261031-030639-e0cb55/`，该目录被 Git 忽略：
 
-- [结构化报告](../../tests/e2e/.artifacts/20261031-025327-b2c6be/report.json)
-- [编辑器截图](../../tests/e2e/.artifacts/20261031-025327-b2c6be/02-editor.png)
-- [项目截图](../../tests/e2e/.artifacts/20261031-025327-b2c6be/03-projects.png)
-- [品牌截图](../../tests/e2e/.artifacts/20261031-025327-b2c6be/04-brand.png)
-- [AI 未接入状态](../../tests/e2e/.artifacts/20261031-025327-b2c6be/05-studio-ai-unavailable.png)
-- [PNG 文件](../../tests/e2e/.artifacts/20261031-025327-b2c6be/export.png)、[PDF 文件](../../tests/e2e/.artifacts/20261031-025327-b2c6be/export.pdf)
+- [结构化报告](../../tests/e2e/.artifacts/20261031-030639-e0cb55/report.json)
+- [编辑器截图](../../tests/e2e/.artifacts/20261031-030639-e0cb55/02-editor.png)
+- [项目截图](../../tests/e2e/.artifacts/20261031-030639-e0cb55/03-projects.png)
+- [品牌截图](../../tests/e2e/.artifacts/20261031-030639-e0cb55/04-brand.png)
+- [AI 未接入状态](../../tests/e2e/.artifacts/20261031-030639-e0cb55/05-studio-ai-unavailable.png)
+- [PNG 文件](../../tests/e2e/.artifacts/20261031-030639-e0cb55/export.png)、[PDF 文件](../../tests/e2e/.artifacts/20261031-030639-e0cb55/export.pdf)
 - `trace.zip` 以及第二账号隔离截图。
 
 已实际查看编辑器与 AI 工作区截图，均有有效页面内容。截图有效不等于全部页面像素一致性通过。
 
+## 编辑器操作、草稿恢复与并发冲突
+
+命令：`python3 tests/e2e/editor_interactions.py`，现提供入口 `pnpm test:editor`。最终运行 ID：`20261031-030533-406d00`。
+
+已读取[结构化报告](../../tests/e2e/.artifacts/editor-20261031-030533-406d00/report.json)：**14/14 通过，页面异常 0 条，HTTP 5xx 0 条，双标签场景捕获真实 HTTP 409 一次**。同目录保留 `trace.zip` 与 6 张截图。
+
+操作覆盖 Shift 多选、组合/取消组合、多图层对齐、旋转、cover 裁切位置、画布尺寸、视口缩放、复制与删除。每次逆向/重做都比较实际保存文档；缩放不改变设计数据，复制/删除恢复图层成员与顺序。
+
+恢复测试明确区分三个场景：
+
+| 场景 | 实际观察 | 验证结论 |
+|---|---|---|
+| 明确未提交的 PATCH | 使用 `route.abort` 中止 1 次 PATCH；服务端内容与 revision 1 保持不变 | IndexedDB 草稿刷新后恢复，解除阻断后真实在线保存成功；这是传输故障注入，没有 mock API 数据 |
+| 浏览器模拟离线 | `context.set_offline(true)` 下 `navigator.onLine` 为 false，但服务端 revision 从 1 变为 2，保存已经提交而前端收到失败 | 重新打开后完整保留本地草稿，显示保守冲突，不覆盖已提交服务端内容；不宣称失败请求一定未提交或自动无冲突同步 |
+| 两个标签页并发编辑 | 第一个标签保存，第二个标签收到真实 HTTP 409 | 第二个标签刷新仍保留本地修改，另存副本成功，原项目保持第一份内容 |
+
+先前编辑器脚本把“收到失败响应”当成“服务端未提交”，导致等待保存响应超时。最终用例显式读取服务端 revision，并将确定未提交与提交结果不确定分开验证。此结果不代表完整离线应用、自动冲突合并或任意网络/进程故障都已覆盖。
+
+## 编辑器与导出的有限渲染对比
+
+实际命令：`node tests/e2e/render_consistency.mjs`，现提供入口 `pnpm test:render`。运行 ID：`render-1793440851347`。
+
+结果：**2/2 通过，页面运行异常 0 条**。两份文档均比较真实浏览器编辑器 DOM 截图与独立 Renderer 任务产生的 PNG；只归一化编辑器画板的视口位置与缩放，保留内容样式。
+
+| 文档 | 覆盖点 | 实际结果 |
+|---|---|---|
+| 600 × 500 | 中文/英文、衬线、自动换行、图片 cover | `changedPixelRatio = 0`，`meanMaxChannelDelta = 0` |
+| 480 × 400 | 旋转、透明度、图片 contain、越界裁切、隐藏图层 | `changedPixelRatio = 0`，`meanMaxChannelDelta = 0` |
+
+证据：[对比报告](../../tests/e2e/.artifacts/render-1793440851347/report.json)，同目录保留两组 editor/export PNG。本项是同机 Chromium、1×、两份样本的结果；不是完整 50 份金样、跨浏览器、跨操作系统或所有字体的渲染一致性证明，也不是原型页面像素差异验收。
+
+## 原型视觉复核
+
+实际逐张查看 `artifacts/baseline/` 下的 [home](../../artifacts/baseline/home.png)、[templates](../../artifacts/baseline/templates.png)、[projects](../../artifacts/baseline/projects.png)、[assets](../../artifacts/baseline/assets.png)、[studio](../../artifacts/baseline/studio.png)：**5 张都有完整可辨认的页面内容，不是空白截图**。
+
+再对照本次浏览器旅程的首页、项目页、品牌页和工作区截图，确认以下视觉结构保留：
+
+- 首页的左侧导航、顶部栏、珊瑚色主按钮、标题区、输入面板和模板卡片。
+- 项目页的标题、文件夹区、搜索/排序与作品卡片；展示内容变为真实账户数据，并增加回收站及文件夹管理入口。最终项目缩略图使用共享文档渲染，按完整画板比例显示真实保存内容，已替换原来固定文字的静态海报。
+- 资产库的页头、导航标签和上传入口；本次截图为品牌编辑状态，不能据此宣称素材列表逐项对齐。
+- 工作区的左侧会话/输入面板、技能卡片面板和右侧画布；增加真实保存状态、编辑操作栏及 AI 未接入说明。
+
+基线视口为 1440 × 900，浏览器旅程为 1440 × 1000，且用户、项目数量、选中标签和面板状态不同，因此未计算页面像素差异百分比。模板页基线确认有效，尚无同状态的本轮模板页截图作直接视觉对照。统一打包字体有意替换机器相关的设计文字字体，不能宣称所有字形与旧原型完全相同。
+
+## 启动与交付检查
+
+本机实际检查：Node.js `22.22.3`、pnpm `10.20.0`、Docker Compose `5.4.0`；Compose 配置校验通过；PostgreSQL 容器 healthy、SeaweedFS 容器 running；Web 返回 HTTP 200；经 Web 代理请求 `/api/health` 返回 `{"status":"ok","aiEnabled":false}`。素材/导出链路另由上述真实测试证明。
+
+已核对文档启动命令与仓库脚本、端口、迁移文件一致，并改为保留已有 `.env`、等待数据库健康后迁移。没有为了验证而删除现有开发卷或清空数据库；本轮不是全新机器从零安装，也不是生产部署验收。`pnpm build` 只构建 Web，后端生产镜像、进程管理、反向代理、流水线及备份恢复仍需后续交付。
+
 ## 先前运行与结果边界
 
-开发中的两处选择器（模板的 aria-label、包含时间戳的版本行）已根据真实 DOM 修正。一次上传测试遇到新 Worker 代码先于数据库迁移启动，任务未完成；迁移后完整重跑已通过。一次 PNG 任务后台成功，但运行期间前端热刷新中断下载等待；冻结业务代码后的最终完整运行已成功下载 PNG 和 PDF。
+开发中的两处选择器（模板的 aria-label、包含时间戳的版本行）已根据真实 DOM 修正。一次上传测试遇到新 Worker 代码先于数据库迁移启动，任务未完成；迁移后完整重跑已通过。一次 PNG 任务后台成功，但运行期间前端热刷新中断下载等待；稳定版本完整运行已成功下载 PNG 和 PDF。随后修复项目卡片沿用静态海报而无法反映已保存文字的问题，增加预览文字断言，并再次执行上述最终 11 项完整旅程通过。
 
-本脚本未证明大规模性能、真实中文输入法组合输入、全部离线/进程故障恢复、导出像素 SSIM、生产部署或 AI/Codex/E2B 运行。Board 多选/对齐/删除撤销等专项结果由对应实施与验证记录另行报告，不能从本脚本的 AI 未接入检查推导。
+完整浏览器旅程未证明大规模性能、真实中文输入法组合输入、全部离线/进程故障恢复、生产部署或 AI/Codex/E2B 运行。渲染比较的有效范围以上述两份样本为限。Board 多选/对齐/删除撤销等专项结果由对应实施与验证记录另行报告，不能从本脚本的 AI 未接入检查推导。

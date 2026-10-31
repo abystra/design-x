@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDownWideNarrow, ArrowLeft, ArrowUpRight, Check, CheckCircle2, ChevronDown, ChevronRight, Folder, FolderPlus, Grid2X2, Heart, Image, Layers, List, MoreHorizontal, Palette, Pencil, Plus, RotateCcw, Search, Sparkles, Trash2, Upload, X } from 'lucide-react';
 import { api, uploadAsset } from '../lib/api';
+import DesignThumbnail from './DesignThumbnail';
 import './workspace.css';
 
 const stockAssets = [
@@ -13,8 +14,8 @@ const defaultBrand = { name: '拾光 SHIGUANG', subtitle: '让好设计，始终
 function Thumb({ item, poster = false }) {
   const isCoffee = /coffee|咖啡|秋日/.test(`${item.image} ${item.title}`);
   return <div className={`ws-thumb ${poster ? 'ws-thumb-poster' : ''}`} style={{ backgroundColor: item.color || '#e4dfd9' }}>
-    {item.image ? <img src={item.image} alt={item.title} loading="lazy" onError={e => { e.currentTarget.style.visibility = 'hidden'; }} /> : <Image size={36} strokeWidth={1} />}
-    {poster && !item.elements && <div className={`ws-poster-copy ${isCoffee ? 'coffee' : ''}`}><span>{isCoffee ? 'THE SLOW MOMENTS' : 'A LITTLE INSPIRATION'}</span><strong>{isCoffee ? <>慢一点，<br />也很好。</> : item.title?.slice(0, 8)}</strong><small>{isCoffee ? 'COFFEE & GOOD DAYS' : 'DESIGNED WITH INTENTION'}</small></div>}
+    {item.design ? <DesignThumbnail design={item.design} title={item.title} /> : item.image ? <img src={item.image} alt={item.title} loading="lazy" onError={e => { e.currentTarget.style.visibility = 'hidden'; }} /> : <Image size={36} strokeWidth={1} />}
+    {poster && !item.design && !item.elements && <div className={`ws-poster-copy ${isCoffee ? 'coffee' : ''}`}><span>{isCoffee ? 'THE SLOW MOMENTS' : 'A LITTLE INSPIRATION'}</span><strong>{isCoffee ? <>慢一点，<br />也很好。</> : item.title?.slice(0, 8)}</strong><small>{isCoffee ? 'COFFEE & GOOD DAYS' : 'DESIGNED WITH INTENTION'}</small></div>}
   </div>;
 }
 function Dialog({ title, description, children, onClose, footer }) {

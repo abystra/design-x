@@ -16,9 +16,12 @@
     "infra:up": "docker compose -f infra/compose/docker-compose.dev.yml up -d",
     "infra:down": "docker compose -f infra/compose/docker-compose.dev.yml down",
     "db:migrate": "tsx db/migrate.ts",
-    "test:api": "tsx --test apps/api/tests/*.test.ts",
+    "test:api": "tsx --test --test-concurrency=1 apps/api/tests/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "test:unit": "tsx --test tests/unit/*.test.ts"
+    "test:unit": "tsx --test tests/unit/*.test.ts",
+    "test:e2e": "python3 tests/e2e/non_ai_journey.py",
+    "test:editor": "python3 tests/e2e/editor_interactions.py",
+    "test:render": "node tests/e2e/render_consistency.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1161.0",

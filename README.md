@@ -4,6 +4,8 @@
 
 AI 执行尚未接入。已确定的后续架构为 **E2B Sandbox → Harness → Codex SDK**，见 [ADR-0001](docs/adr/0001-codex-e2b.md)。产品入口如实显示未接入，不使用规则生成冒充模型能力。
 
+阶段 1 业务持久化与架构已提交 `44fcd0e`；阶段 2 UI 与非 AI 链路已提交 `ead7d15`。架构目录描述的长期目标不等于本阶段全部实现，具体完成度见 [阶段进度](docs/implementation/progress.md)。
+
 ## 本地启动
 
 已验证环境：Node.js 22.22.3、pnpm 10.20.0、Docker。数据库与存储只绑定本机地址，使用专门的开发卷，不覆盖其他项目。
@@ -11,14 +13,16 @@ AI 执行尚未接入。已确定的后续架构为 **E2B Sandbox → Harness �
 ```bash
 corepack enable
 pnpm install --frozen-lockfile
-cp .env.example .env
-pnpm infra:up
+if [ ! -f .env ]; then cp .env.example .env; fi
+docker compose -f infra/compose/docker-compose.dev.yml up -d --wait --wait-timeout 60
 pnpm db:migrate
 pnpm exec playwright install chromium
 pnpm dev:all
 ```
 
-打开 [Design X](http://127.0.0.1:5173/)，创建自己的账户，无预置通用密码。端口：Web 5173、API 3001、PostgreSQL 55432、S3 58333。迁移需要数据库建表/角色权限；请先等 PostgreSQL healthy。已有开发环境可以直接沿用 `.env`，不用覆盖。
+打开 [Design X](http://127.0.0.1:5173/)，创建自己的账户，无预置通用密码。端口：Web 5173、API 3001、PostgreSQL 55432、S3 58333。迁移需要数据库建表/角色权限；上述 `--wait` 等待 PostgreSQL healthy，SeaweedFS 只检查容器运行状态。应用启动后应看到 `Design-X media worker ready` 和 `Design-X renderer ready`；首次上传/导出验证存储与处理链路。
+
+使用 `127.0.0.1:5173` 与示例 `WEB_ORIGIN` 保持一致。改主机名或端口时，需要同步调整 `.env` 和 Vite 配置中的代理/端口。`/api/health` 返回 `status: ok`、`aiEnabled: false` 只证明 API 可达，不代表后台处理全部健康。
 
 各进程也可单独运行：`pnpm dev:web`、`pnpm dev:api`、`pnpm dev:worker`、`pnpm dev:renderer`。仅运行原有 `pnpm dev` 会启动前端，其他进程仍须运行。
 
@@ -43,10 +47,12 @@ pnpm test:unit
 pnpm build
 # 真实 PostgreSQL + S3；测试会启动自己的 worker/renderer。
 # 先停止 pnpm dev:all 中的长期 worker/renderer，避免改变离线队列测试的前提。
-node --import tsx --test --test-concurrency=1 apps/api/tests/*.test.ts
+pnpm test:api
 # 重新启动 pnpm dev:all 后运行浏览器旅程。
 python3 -m pip install -r tests/e2e/requirements.txt
-python3 tests/e2e/non_ai_journey.py
+pnpm test:e2e
+pnpm test:editor
+pnpm test:render
 ```
 
 `pnpm check` 包含页面结构检查以及保留的原型规则/会话测试夹具；这些夹具不参与产品执行，也不能代替真实服务验收。完整浏览器步骤、实际结果与限制见 [验收指南](docs/implementation/verification.md)、[执行记录](docs/implementation/verification-results.md)、[阶段进度](docs/implementation/progress.md)。
@@ -59,4 +65,4 @@ python3 tests/e2e/non_ai_journey.py
 - `packages/server-domain`、`server-infra`：领域业务、RLS、事务、队列和 S3。
 - `db/migrations`、`infra/compose`：可重放 SQL 迁移、本地 PostgreSQL / SeaweedFS。
 
-当前是可本地运行和联调的非 AI 版本，尚未作公网生产部署验收。邮箱验证/找回、OTP、自动冲突 rebase、原生项目导入、定时素材 GC、多人实时协作和后续 AI 执行未实现。生产环境需独立配置数据库角色、存储凭证、HTTPS 和备份，不能使用示例开发密码。
+当前是可本地运行和联调的非 AI 版本，尚未作公网生产部署验收。`pnpm build` 只构建 Web 静态文件；API、Worker、Renderer 的生产镜像、进程管理、反向代理及部署流水线尚未交付。邮箱验证/找回、OTP、自动冲突 rebase、原生项目导入、定时素材 GC、多人实时协作和后续 AI 执行未实现。生产环境需独立配置数据库角色、存储凭证、HTTPS 和备份，不能使用示例开发密码。
