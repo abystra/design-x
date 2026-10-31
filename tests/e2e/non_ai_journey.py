@@ -48,7 +48,7 @@ def main() -> int:
         page = context.new_page()
         page.set_default_timeout(15000)
         page.on('pageerror', lambda error: report['pageErrors'].append(str(error)))
-        page.on('response', lambda response: report['failedResponses'].append({'url': response.url, 'status': response.status}) if response.status >= 500 else None)
+        page.on('response', lambda response: report['failedResponses'].append({'url': response.url, 'status': response.status}) if response.status >= 500 or response.status == 429 else None)
         context.tracing.start(screenshots=True, snapshots=True, sources=False)
 
         def screenshot(name):
@@ -201,10 +201,20 @@ def main() -> int:
             page.get_by_role('button', name='保存品牌套件', exact=True).click()
             expect(page.get_by_role('button', name='已保存品牌套件', exact=True)).to_be_visible()
             assert api('/preferences/brand')['name'] == brand_name
+            brand_reads = []
+            def count_brand_reads(request):
+                if request.method == 'GET' and request.url.endswith('/api/preferences/brand'):
+                    brand_reads.append(request.url)
+            page.on('request', count_brand_reads)
             page.reload(wait_until='domcontentloaded')
             page.get_by_role('tab', name='品牌套件', exact=True).click()
             expect(page.get_by_label('品牌名称', exact=True)).to_have_value(brand_name)
-            check(current, {'folderId': folder['id']})
+            # Reconnecting replays real persisted export/upload events. That
+            # burst must trigger a bounded refresh instead of one read per event.
+            page.wait_for_timeout(700)
+            page.remove_listener('request', count_brand_reads)
+            assert 1 <= len(brand_reads) <= 3, f'SSE replay caused {len(brand_reads)} brand reads'
+            check(current, {'folderId': folder['id'], 'brandReadsAfterReconnect': len(brand_reads)})
             screenshot('04-brand')
 
             current = 'ai-unavailable-preserves-draft-without-generation'

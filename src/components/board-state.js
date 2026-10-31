@@ -2,6 +2,27 @@
 // in the editor/backend and are reattached from the latest known document DTO.
 export const copyBoardValue = (value) => JSON.parse(JSON.stringify(value));
 
+export function boardPersistenceSnapshot(snapshot) {
+  return {
+    ...snapshot,
+    results: snapshot.results.map(({ design, revision, ...result }) => result),
+  };
+}
+
+export function initialPersistenceBaseline(snapshot, serverSnapshot) {
+  // These fields may be supplied by the Home/skill handoff or normalized on
+  // mount. Compare against what the server actually stored, not that handoff.
+  return boardPersistenceSnapshot({
+    ...snapshot,
+    draft: serverSnapshot.draft || "",
+    skill: serverSnapshot.skill || null,
+    mode: serverSnapshot.mode || "Agent",
+    assets: serverSnapshot.assets || [],
+    attached: serverSnapshot.attached || [],
+    messages: serverSnapshot.messages || [],
+  });
+}
+
 export function boardItems(board) {
   return [
     ...(board.results || []).map((item) => ({ ...item, kind: "artboard" })),

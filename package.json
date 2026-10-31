@@ -23,7 +23,11 @@
     "test:editor": "python3 tests/e2e/editor_interactions.py",
     "test:render": "node tests/e2e/render_consistency.mjs",
     "test:board": "python3 tests/e2e/board_features.py",
-    "test:import": "python3 tests/e2e/project_import.py"
+    "test:import": "python3 tests/e2e/project_import.py",
+    "test:board-scale": "python3 tests/e2e/board_virtualization.py",
+    "perf:seed": "python3 scripts/seed-board-performance.py",
+    "test:perf": "python3 tests/perf/board_performance.py",
+    "test:perf:api": "tsx tests/perf/board-api-benchmark.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1161.0",

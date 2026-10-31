@@ -792,10 +792,10 @@ export default function App({
     setProjects(list);
     return list;
   }
-  async function restoreStudio(id, options = {}) {
+  async function restoreStudio(id, options = {}, loaded = {}) {
     const [project, board] = await Promise.all([
-      api("/projects/" + id),
-      api("/projects/" + id + "/studio"),
+      loaded.project || api("/projects/" + id + "?view=metadata"),
+      loaded.board || api("/projects/" + id + "/studio"),
     ]);
     setStudio({
       id,
@@ -821,21 +821,25 @@ export default function App({
       const skill = item.name
         ? catalog.skills.find((s) => s.name === item.name) || item
         : null;
-      await restoreStudio(project.id, {
-        skill,
-        draft: item.prompt || item.draft || "",
-        mode: item.mode === "智能创作" ? "Agent" : item.mode || "Agent",
-        assets: item.image
-          ? [
-              {
-                id: item.assetId || "reference",
-                name: "参考素材",
-                url: item.image,
-              },
-            ]
-          : [],
-        panel: item.panel,
-      });
+      await restoreStudio(
+        project.id,
+        {
+          skill,
+          draft: item.prompt || item.draft || "",
+          mode: item.mode === "智能创作" ? "Agent" : item.mode || "Agent",
+          assets: item.image
+            ? [
+                {
+                  id: item.assetId || "reference",
+                  name: "参考素材",
+                  url: item.image,
+                },
+              ]
+            : [],
+          panel: item.panel,
+        },
+        { project },
+      );
       history.pushState(null, "", "#studio/" + project.id);
       await reloadProjects();
     } catch (e) {
@@ -904,8 +908,12 @@ export default function App({
     window.addEventListener("keydown", onKey);
     window.addEventListener("designx:refresh", refresh);
     const events = new EventSource("/api/events");
+    // Reconnection replays persisted events. Coalesce that burst before notifying
+    // subscribers, each of which may read several workspace resources.
+    let workspaceEventTimer;
     const event = () => {
-      refreshWorkspace();
+      clearTimeout(workspaceEventTimer);
+      workspaceEventTimer = setTimeout(refreshWorkspace, 180);
     };
     events.onmessage = event;
     [
@@ -921,6 +929,8 @@ export default function App({
       window.removeEventListener("popstate", onHash);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("designx:refresh", refresh);
+      clearTimeout(refreshTimer);
+      clearTimeout(workspaceEventTimer);
       clearTimeout(timer.current);
     };
   }, []);
@@ -983,7 +993,7 @@ export default function App({
     try {
       const board = await api("/projects/" + p.id + "/studio");
       if (board.snapshot) {
-        await restoreStudio(p.id);
+        await restoreStudio(p.id, {}, { project: p, board });
         history.pushState(null, "", "#studio/" + p.id);
       } else await edit(p);
     } catch (e) {

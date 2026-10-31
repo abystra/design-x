@@ -54,10 +54,13 @@ import {
   assignSectionMembers,
   expandSelection,
   copyBoardValue,
+  boardPersistenceSnapshot,
+  initialPersistenceBaseline,
 } from "./board-state";
 import { templates } from "../data/templates";
 import { initialDesign } from "./Editor";
-import { ArtboardRenderer } from "../../packages/doc-render/src/render";
+import BoardWorld, { DesignPreview } from "./BoardWorld";
+export { DesignPreview } from "./BoardWorld";
 import "./ai-studio.css";
 
 const SAMPLES = [
@@ -170,31 +173,6 @@ function BoardSizeField({ label, value, min, max, onCommit }) {
     </label>
   );
 }
-export function DesignPreview({ project }) {
-  const design = project.design;
-  if (!design) return <img src={project.image} alt={project.title} />;
-  return (
-    <div
-      className="st-design"
-      style={{
-        aspectRatio: `${design.width}/${design.height}`,
-        background: design.background,
-      }}
-    >
-      <svg
-        viewBox={`0 0 ${design.width} ${design.height}`}
-        role="img"
-        aria-label={project.title}
-      >
-        <foreignObject x="0" y="0" width={design.width} height={design.height}>
-          <div xmlns="http://www.w3.org/1999/xhtml">
-            <ArtboardRenderer design={design} />
-          </div>
-        </foreignObject>
-      </svg>
-    </div>
-  );
-}
 export default function AIStudio({
   session,
   onBack,
@@ -230,9 +208,13 @@ export default function AIStudio({
   );
   const [skill, setSkill] = useState(snap.skill || session.skill || null);
   const [mode, setMode] = useState(snap.mode || session.mode || "Agent");
-  const [assets, setAssets] = useState(snap.assets || session.assets || []);
+  const [assets, setAssets] = useState(
+    snap.assets?.length ? snap.assets : session.assets || snap.assets || [],
+  );
   const [attached, setAttached] = useState(
-    snap.attached || session.assets || [],
+    snap.attached?.length
+      ? snap.attached
+      : session.assets || snap.attached || [],
   );
   const [ratio, setRatio] = useState(snap.ratio || "自动");
   const [count, setCount] = useState(snap.count || "自动");
@@ -272,6 +254,12 @@ export default function AIStudio({
     latest = useRef();
   const revision = useRef(session.revision || 1);
   const savedJson = useRef("");
+  const savedSnapshot = useRef(null);
+  const initializedSnapshot = useRef(false);
+  const world = useRef(null);
+  const handlers = useRef({});
+  const gestureFrame = useRef(null);
+  const liveView = useRef(view);
   const chain = useRef(Promise.resolve());
   const saveTimer = useRef();
   const conflict = useRef(false);
@@ -315,24 +303,65 @@ export default function AIStudio({
         : assetTab === "创作参考"
           ? references
           : STOCK;
-  latest.current = {
-    id: projectId,
-    title,
-    messages,
-    results,
-    notes,
-    sections,
-    draft,
-    skill,
-    mode,
-    assets,
-    attached,
-    ratio,
-    count,
-    view,
-    selected,
-    selection,
-    reference,
+  const snapshot = useMemo(
+    () => ({
+      id: projectId,
+      title,
+      messages,
+      results,
+      notes,
+      sections,
+      draft,
+      skill,
+      mode,
+      assets,
+      attached,
+      ratio,
+      count,
+      view,
+      selected,
+      selection,
+      reference,
+    }),
+    [
+      projectId,
+      title,
+      messages,
+      results,
+      notes,
+      sections,
+      draft,
+      skill,
+      mode,
+      assets,
+      attached,
+      ratio,
+      count,
+      view,
+      selected,
+      selection,
+      reference,
+    ],
+  );
+  latest.current = snapshot;
+  if (!savedSnapshot.current) {
+    const candidate = JSON.stringify(persistedSnapshot(snapshot));
+    const baseline = initializedSnapshot.current
+      ? candidate
+      : JSON.stringify(initialPersistenceBaseline(snapshot, snap));
+    savedJson.current = baseline;
+    savedSnapshot.current = candidate === baseline ? snapshot : {};
+    initializedSnapshot.current = true;
+  }
+  handlers.current = {
+    startPointer,
+    selectResult,
+    updateItem,
+    setEditingNote,
+    openEditor,
+    referenceDesign,
+    saveDesign,
+    finishGesture,
   };
 
   function enqueue(action) {
@@ -340,33 +369,35 @@ export default function AIStudio({
     chain.current = next;
     return next;
   }
+  function persistedSnapshot(value) {
+    return boardPersistenceSnapshot(value);
+  }
   async function saveNow() {
-    const snapshot = latest.current;
-    const serialized = JSON.stringify(snapshot);
-    if (serialized === savedJson.current) return;
+    const value = latest.current;
+    if (value === savedSnapshot.current) return;
+    // Serialize only the light Board organization, once at the settled save
+    // boundary. Designs remain in their authoritative artboard documents.
+    const payload = persistedSnapshot(value);
+    const serialized = JSON.stringify(payload);
+    if (serialized === savedJson.current) {
+      savedSnapshot.current = value;
+      if (mounted.current) setSaveState("saved");
+      return;
+    }
     if (conflict.current)
       throw new Error("工作区存在版本冲突，请先处理未保存的更改");
     if (mounted.current) setSaveState("saving");
     try {
-      const saved = await api(`/projects/${projectId}/studio`, {
+      const saved = await api(`/projects/${projectId}/studio?response=ack`, {
         method: "PUT",
-        body: {
-          snapshot: {
-            ...snapshot,
-            results: snapshot.results.map(
-              ({ design, revision, ...result }) => result,
-            ),
-          },
-          baseRevision: revision.current,
-        },
+        body: { snapshot: payload, baseRevision: revision.current },
       });
       revision.current = saved.revision;
       savedJson.current = serialized;
+      savedSnapshot.current = value;
       if (mounted.current) {
         setSaveError("");
-        setSaveState(
-          JSON.stringify(latest.current) === serialized ? "saved" : "dirty",
-        );
+        setSaveState(latest.current === value ? "saved" : "dirty");
       }
     } catch (failure) {
       if (failure.status === 409) {
@@ -381,52 +412,49 @@ export default function AIStudio({
     }
   }
   function flush() {
+    finishGesture();
     clearTimeout(saveTimer.current);
     return enqueue(saveNow);
   }
   useEffect(() => {
-    if (
-      JSON.stringify(latest.current) === savedJson.current ||
-      conflict.current
-    )
-      return;
+    if (snapshot === savedSnapshot.current || conflict.current) return;
     setSaveState("dirty");
     clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
+    const autosave = () => {
+      // A gesture owns its temporary positions until pointer release. Saving
+      // selection changes must not terminate a long drag or pan halfway through.
+      if (drag.current) {
+        saveTimer.current = setTimeout(autosave, 250);
+        return;
+      }
       flush().catch(() => {});
-    }, 650);
+    };
+    saveTimer.current = setTimeout(autosave, 650);
     return () => clearTimeout(saveTimer.current);
-  }, [
-    title,
-    messages,
-    results,
-    notes,
-    sections,
-    draft,
-    skill,
-    mode,
-    assets,
-    attached,
-    ratio,
-    count,
-    view,
-    selected,
-    selection,
-    reference,
-  ]);
+  }, [snapshot]);
   useEffect(() => {
     mounted.current = true;
-    const warn = (e) => {
-      if (JSON.stringify(latest.current) !== savedJson.current) {
-        e.preventDefault();
-        e.returnValue = "";
+    const warn = (event) => {
+      finishGesture();
+      if (latest.current !== savedSnapshot.current) {
+        event.preventDefault();
+        event.returnValue = "";
       }
     };
+    const blur = () => finishGesture();
+    const visibility = () => {
+      if (document.visibilityState === "hidden") finishGesture();
+    };
     window.addEventListener("beforeunload", warn);
+    window.addEventListener("blur", blur);
+    document.addEventListener("visibilitychange", visibility);
     return () => {
+      finishGesture({ render: false });
       mounted.current = false;
       clearTimeout(saveTimer.current);
       window.removeEventListener("beforeunload", warn);
+      window.removeEventListener("blur", blur);
+      document.removeEventListener("visibilitychange", visibility);
       if (!conflict.current) enqueue(saveNow).catch(() => {});
     };
   }, []);
@@ -536,6 +564,7 @@ export default function AIStudio({
     setSelected((id) => (available.has(id) ? id : null));
   }
   function undo() {
+    finishGesture();
     const previous = history.current.past.pop();
     if (!previous) return;
     history.current.future.push(organization());
@@ -543,6 +572,7 @@ export default function AIStudio({
     renderHistory((n) => n + 1);
   }
   function redo() {
+    finishGesture();
     const next = history.current.future.pop();
     if (!next) return;
     history.current.past.push(organization());
@@ -550,6 +580,7 @@ export default function AIStudio({
     renderHistory((n) => n + 1);
   }
   function selectResult(id, event) {
+    finishGesture();
     setSelected(id);
     setSelection((ids) =>
       event?.shiftKey
@@ -560,6 +591,7 @@ export default function AIStudio({
     );
   }
   function removeSelected() {
+    finishGesture();
     if (busy || conflicted) return;
     commitBoard(removeBoardItems(latest.current, selection));
     setSelection([]);
@@ -568,10 +600,12 @@ export default function AIStudio({
     setEditingNote(null);
   }
   function alignSelected(axis) {
+    finishGesture();
     if (busy || conflicted) return;
     commitBoard(alignBoardItems(latest.current, selection, axis));
   }
   function updateItem(id, values) {
+    finishGesture();
     if (busy || conflicted) return;
     commitBoard({
       ...latest.current,
@@ -584,6 +618,7 @@ export default function AIStudio({
     });
   }
   function addNote() {
+    finishGesture();
     if (busy || conflicted) return;
     const note = {
       id: uid(),
@@ -602,6 +637,7 @@ export default function AIStudio({
     fit([note]);
   }
   function addSection() {
+    finishGesture();
     if (busy || conflicted) return;
     const members = boardItems(latest.current).filter(
       (item) => selection.includes(item.id) && item.kind !== "section",
@@ -646,11 +682,13 @@ export default function AIStudio({
     fit([section]);
   }
   function joinSection(sectionId) {
+    finishGesture();
     if (!sectionId || busy || conflicted) return;
     commitBoard(assignSectionMembers(latest.current, sectionId, selection));
     onToast?.("选中内容已加入分区");
   }
   function removeFromSections(ids = selection) {
+    finishGesture();
     const removing = new Set(ids);
     commitBoard({
       ...latest.current,
@@ -674,6 +712,7 @@ export default function AIStudio({
       }
       if (editing) return;
       if (e.key === "Escape") {
+        finishGesture();
         setPanel(null);
         setPopover(null);
         setShowNew(false);
@@ -685,6 +724,7 @@ export default function AIStudio({
       if (busy || conflict.current) return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a") {
         e.preventDefault();
+        finishGesture();
         setSelection(boardItems(latest.current).map((r) => r.id));
         return;
       }
@@ -709,6 +749,7 @@ export default function AIStudio({
       ) {
         e.preventDefault();
         const amount = e.shiftKey ? 10 : 1;
+        finishGesture();
         commitBoard(
           moveBoardItems(
             latest.current,
@@ -801,7 +842,7 @@ export default function AIStudio({
   }
   function fit(list = boardItems(latest.current)) {
     if (!list.length) {
-      setView({ x: 70, y: 140, zoom: 1 });
+      changeView({ x: 70, y: 140, zoom: 1 });
       return;
     }
     const bounds = viewport.current?.getBoundingClientRect();
@@ -819,25 +860,31 @@ export default function AIStudio({
       0.2,
       Math.min(1, (w - 90) / (maxX - minX), (h - 190) / (maxY - minY)),
     );
-    setView({
+    changeView({
       x: (w - (maxX - minX) * z) / 2 - minX * z,
       y: 100 - minY * z,
       zoom: z,
     });
   }
+  function changeView(next) {
+    finishGesture();
+    liveView.current = next;
+    latest.current = { ...latest.current, view: next };
+    setView(next);
+  }
   function zoomBy(delta) {
-    setView((v) => {
-      const z = Math.max(
-        0.2,
-        Math.min(2, Math.round((v.zoom + delta) * 100) / 100),
-      );
-      const w = viewport.current?.clientWidth || 800,
-        h = viewport.current?.clientHeight || 700;
-      return {
-        zoom: z,
-        x: w / 2 - ((w / 2 - v.x) * z) / v.zoom,
-        y: h / 2 - ((h / 2 - v.y) * z) / v.zoom,
-      };
+    finishGesture();
+    const value = world.current?.getView() || liveView.current;
+    const zoom = Math.max(
+      0.2,
+      Math.min(2, Math.round((value.zoom + delta) * 100) / 100),
+    );
+    const width = viewport.current?.clientWidth || 800,
+      height = viewport.current?.clientHeight || 700;
+    changeView({
+      zoom,
+      x: width / 2 - ((width / 2 - value.x) * zoom) / value.zoom,
+      y: height / 2 - ((height / 2 - value.y) * zoom) / value.zoom,
     });
   }
   function generate() {
@@ -877,70 +924,157 @@ export default function AIStudio({
       setError(failure.message);
     }
   }
-  function startPointer(e, result) {
+  function startPointer(event, result) {
     if (
-      e.button !== 0 ||
-      e.target.closest("button,input,textarea,select") ||
+      event.button !== 0 ||
+      event.target.closest("button,input,textarea,select") ||
       busy ||
       conflicted
     )
       return;
-    e.currentTarget.setPointerCapture(e.pointerId);
+    finishGesture();
+    const currentView = world.current?.getView() || liveView.current;
+    liveView.current = currentView;
+    // Pan capture belongs to the stable viewport: the article under the
+    // initial press is allowed to leave overscan and unmount during the pan.
+    const captureTarget =
+      result && tool === "select"
+        ? event.currentTarget
+        : viewport.current || event.currentTarget;
+    captureTarget.setPointerCapture(event.pointerId);
+    const common = {
+      x: event.clientX,
+      y: event.clientY,
+      lastX: event.clientX,
+      lastY: event.clientY,
+      alt: event.altKey,
+      captureTarget,
+      pointerId: event.pointerId,
+      zoom: currentView.zoom,
+      moved: false,
+    };
     if (result && tool === "select") {
-      const ids = e.shiftKey
+      const ids = event.shiftKey
         ? selection.includes(result.id)
           ? selection.filter((id) => id !== result.id)
           : [...selection, result.id]
         : selection.includes(result.id)
           ? selection
           : [result.id];
+      const expanded = expandSelection(latest.current, ids);
       setSelected(result.id);
       setSelection(ids);
       drag.current = {
-        ids,
-        x: e.clientX,
-        y: e.clientY,
+        ...common,
+        ids: expanded,
         start: organization(),
-        startBoard: { ...latest.current },
-        moved: false,
+        startBoard: latest.current,
+        pinnedIds:
+          world.current?.getMountedIds().filter((id) => expanded.has(id)) || [],
       };
-    } else {
-      drag.current = {
-        x: e.clientX,
-        y: e.clientY,
-        startView: { x: view.x, y: view.y },
-      };
+    } else drag.current = { ...common, startView: currentView };
+    event.stopPropagation();
+  }
+  function gestureDelta(gesture) {
+    const dx = gesture.lastX - gesture.x,
+      dy = gesture.lastY - gesture.y;
+    if (gesture.ids) {
+      const snap = (value) =>
+        gesture.alt ? value : Math.round(value / 10) * 10;
+      return { dx: snap(dx / gesture.zoom), dy: snap(dy / gesture.zoom) };
     }
-    e.stopPropagation();
+    return { dx, dy };
   }
-  function movePointer(e) {
-    const dragging = drag.current;
-    if (!dragging) return;
-    const dx = e.clientX - dragging.x,
-      dy = e.clientY - dragging.y;
-    if (dragging.ids) {
-      if (Math.abs(dx) + Math.abs(dy) < 2) return;
-      dragging.moved = true;
-      updateBoard(
-        moveBoardItems(
-          dragging.startBoard,
-          dragging.ids,
-          dx / view.zoom,
-          dy / view.zoom,
-          !e.altKey,
-        ),
-      );
-    } else
-      setView((v) => ({
-        ...v,
-        x: dragging.startView.x + dx,
-        y: dragging.startView.y + dy,
-      }));
+  function paintGesture() {
+    gestureFrame.current = null;
+    const gesture = drag.current;
+    if (!gesture || !gesture.moved) return;
+    if (!viewport.current?.getClientRects().length) {
+      finishGesture();
+      return;
+    }
+    const { dx, dy } = gestureDelta(gesture);
+    if (gesture.ids)
+      world.current?.previewDrag({
+        ids: gesture.ids,
+        dx,
+        dy,
+        pinnedIds: gesture.pinnedIds,
+      });
+    else {
+      liveView.current = {
+        ...gesture.startView,
+        x: gesture.startView.x + dx,
+        y: gesture.startView.y + dy,
+      };
+      world.current?.previewView(liveView.current);
+    }
   }
-  function endPointer() {
-    const moved = drag.current;
+  function movePointer(event) {
+    const gesture = drag.current;
+    if (!gesture) return;
+    gesture.lastX = event.clientX;
+    gesture.lastY = event.clientY;
+    gesture.alt = event.altKey;
+    if (
+      Math.abs(gesture.lastX - gesture.x) +
+        Math.abs(gesture.lastY - gesture.y) <
+        2 &&
+      !gesture.moved
+    )
+      return;
+    gesture.moved = true;
+    if (gestureFrame.current == null)
+      gestureFrame.current = requestAnimationFrame(paintGesture);
+  }
+  function finishGesture({ render = true } = {}) {
+    if (gestureFrame.current != null)
+      cancelAnimationFrame(gestureFrame.current);
+    gestureFrame.current = null;
+    const gesture = drag.current;
+    if (!gesture) return;
     drag.current = null;
-    if (moved?.ids && moved.moved) commitBoard(latest.current, moved.start);
+    if (gesture.moved) {
+      const { dx, dy } = gestureDelta(gesture);
+      if (gesture.ids) {
+        const next = moveBoardItems(gesture.startBoard, gesture.ids, dx, dy);
+        if (render) commitBoard(next, gesture.start);
+        else
+          latest.current = {
+            ...latest.current,
+            results: next.results,
+            notes: next.notes,
+            sections: next.sections,
+          };
+      } else {
+        const next = {
+          ...gesture.startView,
+          x: gesture.startView.x + dx,
+          y: gesture.startView.y + dy,
+        };
+        liveView.current = next;
+        latest.current = { ...latest.current, view: next };
+        if (render) {
+          world.current?.previewView(next);
+          setView(next);
+        }
+      }
+    }
+    if (render) world.current?.clearPreview();
+    try {
+      if (gesture.captureTarget.hasPointerCapture(gesture.pointerId))
+        gesture.captureTarget.releasePointerCapture(gesture.pointerId);
+    } catch {
+      /* The capture target may have unmounted while opening Editor. */
+    }
+  }
+  function endPointer(event) {
+    if (event?.type === "pointerup" && drag.current) {
+      drag.current.lastX = event.clientX;
+      drag.current.lastY = event.clientY;
+      drag.current.alt = event.altKey;
+    }
+    finishGesture();
   }
   function samplePrompt() {
     return (
@@ -961,13 +1095,16 @@ export default function AIStudio({
       await enqueue(async () => {
         for (const specification of specifications) {
           const baseRevision = revision.current;
-          const artboard = await api(`/projects/${projectId}/artboards`, {
+          const response = await api(`/projects/${projectId}/artboards`, {
             method: "POST",
             body: specification,
           });
+          const { boardRevision, ...artboard } = response;
           created.push(artboard);
-          const remote = await api(`/projects/${projectId}/studio`);
-          if (remote.revision !== baseRevision + 1) {
+          const nextRevision =
+            boardRevision ??
+            (await api(`/projects/${projectId}/studio`)).revision;
+          if (nextRevision !== baseRevision + 1) {
             conflict.current = true;
             setConflicted(true);
             setSaveError("创建期间工作区在其他页面更新，请保留草稿后重新载入");
@@ -975,7 +1112,7 @@ export default function AIStudio({
               "工作区版本已变化，已创建画板保存在服务器，请重新载入",
             );
           }
-          revision.current = remote.revision;
+          revision.current = nextRevision;
           const list = [
             ...latest.current.results.filter((r) => r.id !== artboard.id),
             artboard,
@@ -1068,6 +1205,7 @@ export default function AIStudio({
     ]);
   }
   async function duplicateSelected() {
+    finishGesture();
     if (busy || uploading || conflicted || !selection.length) return;
     const before = organization();
     const source = { ...latest.current };
@@ -1204,7 +1342,8 @@ export default function AIStudio({
       setAttached(snapshot.attached || []);
       setRatio(snapshot.ratio || "自动");
       setCount(snapshot.count || "自动");
-      setView(snapshot.view || { x: 70, y: 140, zoom: 1 });
+      liveView.current = snapshot.view || { x: 70, y: 140, zoom: 1 };
+      setView(liveView.current);
       setSelected(snapshot.selected || null);
       setSelection(snapshot.selection || []);
       setReference(snapshot.reference || null);
@@ -1212,7 +1351,8 @@ export default function AIStudio({
       renderHistory((n) => n + 1);
       setError("");
       setSaveState("saved");
-      savedJson.current = JSON.stringify(snapshot);
+      savedJson.current = JSON.stringify(persistedSnapshot(snapshot));
+      savedSnapshot.current = null;
     } catch (failure) {
       setSaveError(failure.message);
     }
@@ -1617,6 +1757,7 @@ export default function AIStudio({
         onPointerMove={movePointer}
         onPointerUp={endPointer}
         onPointerCancel={endPointer}
+        onLostPointerCapture={() => finishGesture()}
       >
         <div className="st-canvas-top">
           <div className="st-canvas-top-left">
@@ -1750,147 +1891,18 @@ export default function AIStudio({
             )}
           </div>
         )}
-        <div
-          className="st-world"
-          style={{
-            transform: `translate(${view.x}px,${view.y}px) scale(${view.zoom})`,
-          }}
-        >
-          {sections.map((section, index) => (
-            <article
-              key={section.id}
-              data-board-id={section.id}
-              className={`st-section ${selection.includes(section.id) ? "is-selected" : ""}`}
-              style={{
-                left: section.position.x,
-                top: section.position.y,
-                width: section.width,
-                height: section.height,
-                "--item-color": section.color,
-              }}
-              onPointerDown={(event) => startPointer(event, section)}
-            >
-              <div className="st-section-header">
-                <button
-                  aria-label={`选中分区 ${index + 1} ${section.title}`}
-                  onClick={(event) => selectResult(section.id, event)}
-                >
-                  <SquareDashed size={15} />
-                  <span>{section.title}</span>
-                </button>
-                <span className="st-section-grip" title="拖动分区及其中内容">
-                  {section.itemIds.length} 项
-                </span>
-              </div>
-            </article>
-          ))}
-          {notes.map((note, index) => (
-            <article
-              key={note.id}
-              data-board-id={note.id}
-              className={`st-note ${selection.includes(note.id) ? "is-selected" : ""}`}
-              style={{
-                left: note.position.x,
-                top: note.position.y,
-                width: note.width,
-                height: note.height,
-                background: note.color,
-              }}
-              onPointerDown={(event) => startPointer(event, note)}
-            >
-              <div className="st-note-header">
-                <button
-                  aria-label={`选中便签 ${index + 1}`}
-                  onClick={(event) => selectResult(note.id, event)}
-                >
-                  <StickyNote size={13} />
-                  便签 {index + 1}
-                </button>
-                <span title="拖动便签">⠿</span>
-              </div>
-              {editingNote === note.id ? (
-                <textarea
-                  autoFocus
-                  aria-label="画布便签内容"
-                  maxLength={10000}
-                  value={note.text}
-                  onChange={(event) =>
-                    updateItem(note.id, { text: event.target.value })
-                  }
-                  onBlur={() => setEditingNote(null)}
-                  placeholder="记下你的想法…"
-                />
-              ) : (
-                <div
-                  className={`st-note-content ${!note.text ? "is-placeholder" : ""}`}
-                  onDoubleClick={(event) => {
-                    event.stopPropagation();
-                    selectResult(note.id);
-                    setEditingNote(note.id);
-                  }}
-                >
-                  {note.text || "双击记下你的想法…"}
-                </div>
-              )}
-            </article>
-          ))}
-          {results.map((r, i) => (
-            <article
-              key={r.id}
-              data-board-id={r.id}
-              className={`st-result ${selection.includes(r.id) ? "is-selected" : ""}`}
-              style={{ left: r.position.x, top: r.position.y }}
-              onPointerDown={(e) => startPointer(e, r)}
-              onDoubleClick={() => openEditor(r)}
-            >
-              <div className="st-result-label">
-                <span>
-                  {String(i + 1).padStart(2, "0")} / {r.label || r.title}
-                </span>
-                <b>V{r.revision || r.version || 1}</b>
-              </div>
-              <button
-                className="st-design-select"
-                aria-label={`选中方案 ${i + 1} ${r.title}`}
-                onClick={(e) => selectResult(r.id, e)}
-              >
-                <DesignPreview project={r} />
-              </button>
-              <div className="st-result-caption">
-                <span>
-                  {r.ratio || "画板"} · {r.design.width} × {r.design.height}
-                </span>
-                <IconButton
-                  label={`引用方案 ${i + 1}`}
-                  onClick={() => referenceDesign(r)}
-                >
-                  <MessageSquare size={14} />
-                </IconButton>
-              </div>
-              {selected === r.id && (
-                <div className="st-result-actions">
-                  <button
-                    onClick={() => referenceDesign(r)}
-                    title="AI 续改稍后开放，可先记录需求"
-                  >
-                    <WandSparkles size={13} />
-                    继续修改
-                  </button>
-                  <button onClick={() => openEditor(r)}>
-                    <Expand size={13} />
-                    精细编辑
-                  </button>
-                  <IconButton
-                    label={`保存方案 ${i + 1}`}
-                    onClick={() => saveDesign(r)}
-                  >
-                    {r.persisted ? <Check size={14} /> : <Save size={14} />}
-                  </IconButton>
-                </div>
-              )}
-            </article>
-          ))}
-        </div>
+        <BoardWorld
+          ref={world}
+          results={results}
+          notes={notes}
+          sections={sections}
+          view={view}
+          viewport={viewport}
+          selection={selection}
+          selected={selected}
+          editingNote={editingNote}
+          handlers={handlers}
+        />
         {selected && !panel && (selectedItem || selectedResult) && (
           <aside
             className="st-item-inspector"

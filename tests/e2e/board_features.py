@@ -291,7 +291,7 @@ def main():
                 current_item(remote_snapshot, nid)['text'] = remote_text
                 remote_saved = api('/projects/' + pid + '/studio', 'PUT', {'snapshot': remote_snapshot, 'baseRevision': remote['revision']})
                 local_text = '冲突后必须保留的本地便签 ' + run_id
-                with page.expect_response(lambda r: r.request.method == 'PUT' and r.url.endswith('/api/projects/' + pid + '/studio') and r.status == 409, timeout=20000):
+                with page.expect_response(lambda r: r.request.method == 'PUT' and r.url.split('?')[0].endswith('/api/projects/' + pid + '/studio') and r.status == 409, timeout=20000):
                     page.get_by_label('便签内容', exact=True).fill(local_text)
                     page.keyboard.press('Meta+s' if sys.platform == 'darwin' else 'Control+s')
                 expect(page.get_by_role('button', name='放弃未保存更改并载入服务器版本', exact=True)).to_be_visible()
@@ -329,6 +329,38 @@ def main():
                 assert api('/documents/' + aid)['content'] == design
                 capture('05-empty-board-reopened')
                 check('empty-board-reopens-as-studio-from-project-list')
+
+                stage = 'home-handoff-persists-without-editing-board'
+                if page.get_by_role('button', name='关闭侧边面板', exact=True).count():
+                    page.get_by_role('button', name='关闭侧边面板', exact=True).click()
+                page.get_by_role('button', name='工作空间', exact=True).click()
+                prompt = '从首页交接，进入画布后不编辑即离开 ' + run_id
+                page.get_by_label('描述你的设计需求', exact=True).fill(prompt)
+                page.locator('.composer-tabs').get_by_role('button', name='图片生成', exact=True).click()
+                page.locator('.send-button').click()
+                expect(page.get_by_label('告诉 AI 你的设计需求', exact=True)).to_have_value(prompt)
+                page.wait_for_url('**/#studio/*')
+                handoff_id = page.url.split('#studio/')[-1]
+                assert handoff_id and handoff_id != pid
+                # Do not edit the Board or wait for its debounce timer: leaving
+                # must flush the initial Home handoff rather than treating it
+                # as an already persisted server snapshot.
+                if page.get_by_role('button', name='关闭侧边面板', exact=True).count():
+                    page.get_by_role('button', name='关闭侧边面板', exact=True).click()
+                page.get_by_role('button', name='工作空间', exact=True).click()
+                page.get_by_role('navigation', name='主导航').wait_for()
+                persisted_handoff = api('/projects/' + handoff_id + '/studio')['snapshot']
+                assert persisted_handoff['draft'] == prompt
+                assert persisted_handoff['mode'] == '图片生成'
+                page.get_by_role('navigation', name='主导航').get_by_role('button', name='我的项目', exact=True).click()
+                handoff_project = api('/projects/' + handoff_id + '?view=metadata')
+                page.get_by_role('button', name='打开作品 ' + handoff_project['title'], exact=True).click()
+                expect(page.get_by_label('告诉 AI 你的设计需求', exact=True)).to_have_value(prompt)
+                page.reload(wait_until='domcontentloaded')
+                expect(page.get_by_label('告诉 AI 你的设计需求', exact=True)).to_have_value(prompt)
+                assert api('/projects/' + handoff_id + '/studio')['snapshot']['mode'] == '图片生成'
+                capture('06-home-handoff-reopened')
+                check('home-prompt-and-mode-survive-immediate-leave-reopen-and-refresh', {'projectId': handoff_id})
 
                 stage = 'runtime-errors'
                 assert not report['pageErrors'], report['pageErrors']
