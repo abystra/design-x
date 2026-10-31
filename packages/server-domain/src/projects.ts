@@ -1,4 +1,5 @@
 import { recordOps } from './document-ops.js';
+import { BoardSchema } from '../../doc-core/src/board.js';
 import { z } from 'zod';
 import type { Tx } from '../../server-infra/src/db.js';
 import { id, blankDesign, validateDesign, syncAssetRefs, saveVersion, emit, HttpError, notFound } from './common.js';
@@ -49,7 +50,7 @@ export async function saveStudio(tx:Tx,workspaceId:string,projectId:string,input
  await getProject(tx,projectId);
  const board=(await tx.query("SELECT * FROM documents WHERE project_id=$1 AND kind='board' FOR UPDATE",[projectId])).rows[0];
  if(input.baseRevision!==board.revision)throw new HttpError(409,'DOC_REVISION_CONFLICT','工作区已更新，请刷新后重试');
- const snapshot=z.object({results:z.array(z.any()).max(500),title:z.string().max(200).optional()}).passthrough().parse(input.snapshot);
+ const snapshot=BoardSchema.parse(input.snapshot);
  if(Buffer.byteLength(JSON.stringify(snapshot))>5*1024*1024)throw new HttpError(413,'PAYLOAD_TOO_LARGE','工作区数据过大');
  // Board saves only organize existing Artboards. Their design contents remain authoritative in documents.
  for(const result of snapshot.results){

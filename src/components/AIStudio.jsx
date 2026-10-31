@@ -37,9 +37,24 @@ import {
   AlignLeft,
   AlignStartVertical,
   LayoutTemplate,
+  StickyNote,
+  SquareDashed,
+  FolderPlus,
+  FileArchive,
 } from "lucide-react";
 import catalog from "../data/catalog.json";
-import { api, uploadAsset } from "../lib/api";
+import { api, uploadAsset, waitForJob } from "../lib/api";
+import {
+  boardItems,
+  boardItemSize,
+  organizationSnapshot,
+  moveBoardItems,
+  removeBoardItems,
+  alignBoardItems,
+  assignSectionMembers,
+  expandSelection,
+  copyBoardValue,
+} from "./board-state";
 import { templates } from "../data/templates";
 import { initialDesign } from "./Editor";
 import { ArtboardRenderer } from "../../packages/doc-render/src/render";
@@ -105,7 +120,7 @@ const STOCK = [
   ["interior", "自然家居"],
   ["nature", "户外灵感"],
 ].map(([key, name]) => ({ id: key, name, url: `/assets/${key}.jpg` }));
-const uid = () => `dx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+const uid = () => `dx-${crypto.randomUUID()}`;
 const skillImage = (s) =>
   SAMPLES.find((x) => x.name === s.name)?.image ||
   {
@@ -124,6 +139,35 @@ function IconButton({ label, children, ...props }) {
     <button className="st-icon" aria-label={label} title={label} {...props}>
       {children}
     </button>
+  );
+}
+function BoardSizeField({ label, value, min, max, onCommit }) {
+  const [draftValue, setDraftValue] = useState(String(value));
+  useEffect(() => setDraftValue(String(value)), [value]);
+  return (
+    <label className="st-board-field">
+      <span>{label.endsWith("宽度") ? "宽度" : "高度"}</span>
+      <input
+        type="number"
+        aria-label={label}
+        min={min}
+        max={max}
+        value={draftValue}
+        onChange={(event) => setDraftValue(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") event.currentTarget.blur();
+        }}
+        onBlur={() => {
+          const parsed = Number(draftValue);
+          const next =
+            Number.isFinite(parsed) && draftValue.trim()
+              ? Math.min(max, Math.max(min, Math.round(parsed)))
+              : value;
+          setDraftValue(String(next));
+          if (next !== value) onCommit(next);
+        }}
+      />
+    </label>
   );
 }
 export function DesignPreview({ project }) {
@@ -175,6 +219,12 @@ export default function AIStudio({
     ),
   );
   const [results, setResults] = useState(snap.results || []);
+  const [notes, setNotes] = useState(snap.notes || []);
+  const [sections, setSections] = useState(snap.sections || []);
+  const [editingNote, setEditingNote] = useState(null);
+  const [exportingPackage, setExportingPackage] = useState(false);
+  const [exportStatus, setExportStatus] = useState("");
+  const [targetSection, setTargetSection] = useState("");
   const [draft, setDraft] = useState(
     snap.draft || session.draft || session.initialPrompt || "",
   );
@@ -229,6 +279,9 @@ export default function AIStudio({
   const known = useRef(new Map((snap.results || []).map((r) => [r.id, r])));
   const mounted = useRef(true);
   const selectedResult = results.find((r) => r.id === selected);
+  const selectedNote = notes.find((r) => r.id === selected);
+  const selectedSection = sections.find((r) => r.id === selected);
+  const selectedItem = selectedNote || selectedSection;
   const referenceResult = results.find((r) => r.id === reference);
   const skillList = useMemo(() => {
     const list =
@@ -267,6 +320,8 @@ export default function AIStudio({
     title,
     messages,
     results,
+    notes,
+    sections,
     draft,
     skill,
     mode,
@@ -345,6 +400,8 @@ export default function AIStudio({
     title,
     messages,
     results,
+    notes,
+    sections,
     draft,
     skill,
     mode,
@@ -431,47 +488,64 @@ export default function AIStudio({
       ),
     );
   }, [editedProject]);
-  function organization(list) {
-    return list.map((r) => ({ id: r.id, position: { ...r.position } }));
+  function organization(board = latest.current) {
+    return organizationSnapshot(board);
   }
   function updateResults(list) {
     list.forEach((r) => known.current.set(r.id, r));
     latest.current = { ...latest.current, results: list };
     setResults(list);
   }
-  function commitResults(list, before = organization(latest.current.results)) {
-    if (JSON.stringify(before) !== JSON.stringify(organization(list))) {
+  function updateBoard(next) {
+    updateResults(next.results);
+    latest.current = {
+      ...latest.current,
+      notes: next.notes || [],
+      sections: next.sections || [],
+    };
+    setNotes(next.notes || []);
+    setSections(next.sections || []);
+  }
+  function commitBoard(next, before = organization()) {
+    if (JSON.stringify(before) !== JSON.stringify(organization(next))) {
       history.current.past = [...history.current.past, before].slice(-80);
       history.current.future = [];
       renderHistory((n) => n + 1);
     }
-    updateResults(list);
+    updateBoard(next);
+  }
+  function commitResults(list, before = organization()) {
+    commitBoard({ ...latest.current, results: list }, before);
   }
   function restoreOrganization(snapshot) {
-    const list = snapshot
+    const list = snapshot.results
       .map((item) =>
         known.current.has(item.id)
           ? { ...known.current.get(item.id), position: item.position }
           : null,
       )
       .filter(Boolean);
-    updateResults(list);
-    setSelection((ids) => ids.filter((id) => list.some((r) => r.id === id)));
-    setSelected((id) =>
-      list.some((r) => r.id === id) ? id : list[0]?.id || null,
-    );
+    const next = {
+      ...latest.current,
+      ...copyBoardValue(snapshot),
+      results: list,
+    };
+    updateBoard(next);
+    const available = new Set(boardItems(next).map((item) => item.id));
+    setSelection((ids) => ids.filter((id) => available.has(id)));
+    setSelected((id) => (available.has(id) ? id : null));
   }
   function undo() {
     const previous = history.current.past.pop();
     if (!previous) return;
-    history.current.future.push(organization(latest.current.results));
+    history.current.future.push(organization());
     restoreOrganization(previous);
     renderHistory((n) => n + 1);
   }
   function redo() {
     const next = history.current.future.pop();
     if (!next) return;
-    history.current.past.push(organization(latest.current.results));
+    history.current.past.push(organization());
     restoreOrganization(next);
     renderHistory((n) => n + 1);
   }
@@ -487,26 +561,104 @@ export default function AIStudio({
   }
   function removeSelected() {
     if (busy || conflicted) return;
-    commitResults(
-      latest.current.results.filter((r) => !selection.includes(r.id)),
-    );
+    commitBoard(removeBoardItems(latest.current, selection));
     setSelection([]);
     setSelected(null);
     setReference(null);
+    setEditingNote(null);
   }
   function alignSelected(axis) {
-    const chosen = latest.current.results.filter((r) =>
-      selection.includes(r.id),
-    );
-    if (chosen.length < 2) return;
-    const edge = Math.min(...chosen.map((r) => r.position[axis]));
-    commitResults(
-      latest.current.results.map((r) =>
-        selection.includes(r.id)
-          ? { ...r, position: { ...r.position, [axis]: edge } }
-          : r,
+    if (busy || conflicted) return;
+    commitBoard(alignBoardItems(latest.current, selection, axis));
+  }
+  function updateItem(id, values) {
+    if (busy || conflicted) return;
+    commitBoard({
+      ...latest.current,
+      notes: latest.current.notes.map((item) =>
+        item.id === id ? { ...item, ...values } : item,
       ),
+      sections: latest.current.sections.map((item) =>
+        item.id === id ? { ...item, ...values } : item,
+      ),
+    });
+  }
+  function addNote() {
+    if (busy || conflicted) return;
+    const note = {
+      id: uid(),
+      text: "",
+      position: nextPosition(),
+      width: 240,
+      height: 200,
+      color: "#FFF0B5",
+    };
+    commitBoard({ ...latest.current, notes: [...latest.current.notes, note] });
+    setSelected(note.id);
+    setSelection([note.id]);
+    setEditingNote(note.id);
+    setPanel(null);
+    setMobileView("canvas");
+    fit([note]);
+  }
+  function addSection() {
+    if (busy || conflicted) return;
+    const members = boardItems(latest.current).filter(
+      (item) => selection.includes(item.id) && item.kind !== "section",
     );
+    const minX = members.length
+      ? Math.min(...members.map((item) => item.position.x)) - 35
+      : nextPosition().x;
+    const minY = members.length
+      ? Math.min(...members.map((item) => item.position.y)) - 55
+      : 0;
+    const maxX = members.length
+      ? Math.max(
+          ...members.map((item) => item.position.x + boardItemSize(item).width),
+        ) + 35
+      : minX + 560;
+    const maxY = members.length
+      ? Math.max(
+          ...members.map(
+            (item) => item.position.y + boardItemSize(item).height,
+          ),
+        ) + 35
+      : minY + 420;
+    const section = {
+      id: uid(),
+      title: "新的分区",
+      position: { x: minX, y: minY },
+      width: Math.min(20000, Math.max(240, maxX - minX)),
+      height: Math.min(20000, Math.max(160, maxY - minY)),
+      color: "#CBD8BE",
+      itemIds: [],
+    };
+    const next = assignSectionMembers(
+      { ...latest.current, sections: [...latest.current.sections, section] },
+      section.id,
+      members.map((item) => item.id),
+    );
+    commitBoard(next);
+    setSelected(section.id);
+    setSelection([section.id]);
+    setPanel(null);
+    setMobileView("canvas");
+    fit([section]);
+  }
+  function joinSection(sectionId) {
+    if (!sectionId || busy || conflicted) return;
+    commitBoard(assignSectionMembers(latest.current, sectionId, selection));
+    onToast?.("选中内容已加入分区");
+  }
+  function removeFromSections(ids = selection) {
+    const removing = new Set(ids);
+    commitBoard({
+      ...latest.current,
+      sections: latest.current.sections.map((section) => ({
+        ...section,
+        itemIds: section.itemIds.filter((id) => !removing.has(id)),
+      })),
+    });
   }
   useEffect(() => {
     const onKey = (e) => {
@@ -526,12 +678,14 @@ export default function AIStudio({
         setPopover(null);
         setShowNew(false);
         setSelection([]);
+        setSelected(null);
+        setEditingNote(null);
         return;
       }
       if (busy || conflict.current) return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a") {
         e.preventDefault();
-        setSelection(results.map((r) => r.id));
+        setSelection(boardItems(latest.current).map((r) => r.id));
         return;
       }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
@@ -555,36 +709,23 @@ export default function AIStudio({
       ) {
         e.preventDefault();
         const amount = e.shiftKey ? 10 : 1;
-        commitResults(
-          results.map((r) =>
-            selection.includes(r.id)
-              ? {
-                  ...r,
-                  position: {
-                    x:
-                      r.position.x +
-                      (e.key === "ArrowRight"
-                        ? amount
-                        : e.key === "ArrowLeft"
-                          ? -amount
-                          : 0),
-                    y:
-                      r.position.y +
-                      (e.key === "ArrowDown"
-                        ? amount
-                        : e.key === "ArrowUp"
-                          ? -amount
-                          : 0),
-                  },
-                }
-              : r,
+        commitBoard(
+          moveBoardItems(
+            latest.current,
+            selection,
+            e.key === "ArrowRight"
+              ? amount
+              : e.key === "ArrowLeft"
+                ? -amount
+                : 0,
+            e.key === "ArrowDown" ? amount : e.key === "ArrowUp" ? -amount : 0,
           ),
         );
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [results, selection, busy]);
+  }, [results, notes, sections, selection, busy]);
   async function leave(action) {
     if (busy || uploading) return;
     try {
@@ -658,7 +799,7 @@ export default function AIStudio({
       setUploading(false);
     }
   }
-  function fit(list = results) {
+  function fit(list = boardItems(latest.current)) {
     if (!list.length) {
       setView({ x: 70, y: 140, zoom: 1 });
       return;
@@ -666,11 +807,11 @@ export default function AIStudio({
     const bounds = viewport.current?.getBoundingClientRect();
     const minX = Math.min(...list.map((r) => r.position.x)),
       minY = Math.min(...list.map((r) => r.position.y));
-    const maxX = Math.max(...list.map((r) => r.position.x + 260)),
+    const maxX = Math.max(
+        ...list.map((r) => r.position.x + boardItemSize(r).width),
+      ),
       maxY = Math.max(
-        ...list.map(
-          (r) => r.position.y + (260 * r.design.height) / r.design.width + 65,
-        ),
+        ...list.map((r) => r.position.y + boardItemSize(r).height + 30),
       );
     const w = bounds?.width || 900,
       h = bounds?.height || 700;
@@ -759,7 +900,8 @@ export default function AIStudio({
         ids,
         x: e.clientX,
         y: e.clientY,
-        start: organization(results),
+        start: organization(),
+        startBoard: { ...latest.current },
         moved: false,
       };
     } else {
@@ -779,23 +921,14 @@ export default function AIStudio({
     if (dragging.ids) {
       if (Math.abs(dx) + Math.abs(dy) < 2) return;
       dragging.moved = true;
-      const start = new Map(
-        dragging.start.map((item) => [item.id, item.position]),
-      );
-      updateResults(
-        latest.current.results.map((r) => {
-          if (!dragging.ids.includes(r.id)) return r;
-          const origin = start.get(r.id);
-          const snapTo = (value) =>
-            e.altKey ? value : Math.round(value / 10) * 10;
-          return {
-            ...r,
-            position: {
-              x: snapTo(origin.x + dx / view.zoom),
-              y: snapTo(origin.y + dy / view.zoom),
-            },
-          };
-        }),
+      updateBoard(
+        moveBoardItems(
+          dragging.startBoard,
+          dragging.ids,
+          dx / view.zoom,
+          dy / view.zoom,
+          !e.altKey,
+        ),
       );
     } else
       setView((v) => ({
@@ -807,8 +940,7 @@ export default function AIStudio({
   function endPointer() {
     const moved = drag.current;
     drag.current = null;
-    if (moved?.ids && moved.moved)
-      commitResults(latest.current.results, moved.start);
+    if (moved?.ids && moved.moved) commitBoard(latest.current, moved.start);
   }
   function samplePrompt() {
     return (
@@ -816,7 +948,10 @@ export default function AIStudio({
       `使用${skill?.name || "营销海报"}，为我的新品设计 3 个简约自然的方案`
     );
   }
-  async function createArtboards(specifications) {
+  async function createArtboards(
+    specifications,
+    { record = true, focus = true } = {},
+  ) {
     if (busy || conflict.current) return [];
     setBusy(true);
     setError("");
@@ -841,13 +976,15 @@ export default function AIStudio({
             );
           }
           revision.current = remote.revision;
-          commitResults([
+          const list = [
             ...latest.current.results.filter((r) => r.id !== artboard.id),
             artboard,
-          ]);
+          ];
+          if (record) commitResults(list);
+          else updateResults(list);
         }
       });
-      if (created.length) {
+      if (created.length && focus) {
         setSelected(created.at(-1).id);
         setSelection(created.map((r) => r.id));
         setPanel(null);
@@ -864,9 +1001,12 @@ export default function AIStudio({
     }
   }
   function nextPosition() {
-    const list = latest.current.results;
+    const list = boardItems(latest.current);
     return {
-      x: list.length ? Math.max(...list.map((r) => r.position.x)) + 310 : 0,
+      x: list.length
+        ? Math.max(...list.map((r) => r.position.x + boardItemSize(r).width)) +
+          50
+        : 0,
       y: 0,
     };
   }
@@ -928,14 +1068,106 @@ export default function AIStudio({
     ]);
   }
   async function duplicateSelected() {
-    const list = latest.current.results.filter((r) => selection.includes(r.id));
-    await createArtboards(
-      list.map((r) => ({
-        title: `${r.title} · 副本`,
-        design: r.design,
-        position: { x: r.position.x + 40, y: r.position.y + 40 },
-      })),
+    if (busy || uploading || conflicted || !selection.length) return;
+    const before = organization();
+    const source = { ...latest.current };
+    const ids = expandSelection(source, selection);
+    const resultSources = source.results.filter((r) => ids.has(r.id));
+    const created = resultSources.length
+      ? await createArtboards(
+          resultSources.map((r) => ({
+            title: `${r.title} · 副本`.slice(0, 200),
+            design: r.design,
+            position: { x: r.position.x + 40, y: r.position.y + 40 },
+          })),
+          { record: false, focus: false },
+        )
+      : [];
+    if (conflict.current) return;
+    if (created.length !== resultSources.length) {
+      // Artboard creation is committed individually by the API. Preserve those
+      // returned documents and stop before cloning notes or section membership.
+      commitBoard(latest.current, before);
+      setSelection(created.map((item) => item.id));
+      setSelected(created.at(-1)?.id || null);
+      const message = created.length
+        ? `复制未完成：已创建 ${created.length} 个画板，便签和分区尚未复制。`
+        : "复制未完成，便签和分区尚未复制，请重试。";
+      setError(message);
+      onToast?.(message);
+      return;
+    }
+    const mapping = new Map(
+      created.map((r, index) => [resultSources[index].id, r.id]),
     );
+    const newNotes = source.notes
+      .filter((n) => ids.has(n.id))
+      .map((note) => {
+        const id = uid();
+        mapping.set(note.id, id);
+        return {
+          ...copyBoardValue(note),
+          id,
+          position: { x: note.position.x + 40, y: note.position.y + 40 },
+        };
+      });
+    const newSections = source.sections
+      .filter((s) => selection.includes(s.id))
+      .map((section) => {
+        const id = uid();
+        mapping.set(section.id, id);
+        return {
+          ...copyBoardValue(section),
+          id,
+          title: `${section.title} · 副本`.slice(0, 120),
+          position: { x: section.position.x + 40, y: section.position.y + 40 },
+          itemIds: section.itemIds
+            .map((itemId) => mapping.get(itemId))
+            .filter(Boolean),
+        };
+      });
+    const next = {
+      ...latest.current,
+      notes: [...latest.current.notes, ...newNotes],
+      sections: [...latest.current.sections, ...newSections],
+    };
+    commitBoard(next, before);
+    const copiedSelection = selection
+      .map((id) => mapping.get(id))
+      .filter(Boolean);
+    setSelection(copiedSelection);
+    setSelected(copiedSelection.at(-1) || null);
+    fit(boardItems(next).filter((item) => copiedSelection.includes(item.id)));
+  }
+  async function exportPackage() {
+    if (busy || uploading || conflicted || exportingPackage) return;
+    setExportingPackage(true);
+    setExportStatus("正在准备项目包…");
+    try {
+      await flush();
+      const job = await api(`/projects/${projectId}/exports`, {
+        method: "POST",
+        body: { format: "dxproj" },
+      });
+      const done = await waitForJob(job.job?.id || job.id, (job) =>
+        setExportStatus(
+          job.status === "queued" ? "项目包等待导出…" : "正在打包项目…",
+        ),
+      );
+      const id = done.result?.exportId || done.exportId || done.id;
+      const anchor = document.createElement("a");
+      anchor.href = done.downloadUrl || `/api/exports/${id}/file`;
+      anchor.download = "";
+      anchor.click();
+      setExportStatus("");
+      onToast?.("项目包已生成，包含画板、便签和分区");
+      window.dispatchEvent(new Event("designx:refresh"));
+    } catch (failure) {
+      setExportStatus(failure.message);
+      onToast?.(failure.message);
+    } finally {
+      setExportingPackage(false);
+    }
   }
   function downloadDraft() {
     const url = URL.createObjectURL(
@@ -960,7 +1192,11 @@ export default function AIStudio({
       setSaveError("");
       setTitle(snapshot.title || "新创作");
       setMessages(snapshot.messages || []);
-      updateResults(snapshot.results || []);
+      updateBoard({
+        results: snapshot.results || [],
+        notes: snapshot.notes || [],
+        sections: snapshot.sections || [],
+      });
       setDraft(snapshot.draft || "");
       setSkill(snapshot.skill || null);
       setMode(snapshot.mode || "Agent");
@@ -1413,6 +1649,19 @@ export default function AIStudio({
             </span>
             <span className="st-avatar">Y</span>
             <button
+              className="st-package-export"
+              disabled={busy || uploading || conflicted || exportingPackage}
+              onClick={exportPackage}
+              aria-label="导出项目包"
+            >
+              {exportingPackage ? (
+                <LoaderCircle size={14} className="st-spinning" />
+              ) : (
+                <FileArchive size={14} />
+              )}
+              <span>{exportingPackage ? "打包中…" : "项目包"}</span>
+            </button>
+            <button
               className="st-export"
               disabled={!selectedResult || busy || uploading || conflicted}
               onClick={() => openEditor(selectedResult)}
@@ -1422,7 +1671,7 @@ export default function AIStudio({
             </button>
           </div>
         </div>
-        {!results.length && (
+        {!results.length && !notes.length && !sections.length && (
           <div className="st-empty-canvas">
             <span className="st-empty-symbol">✳</span>
             <span className="st-overline">A SPACE FOR YOUR IDEAS</span>
@@ -1458,6 +1707,23 @@ export default function AIStudio({
             </button>
           </div>
         )}
+        {exportStatus && !saveError && !uploading && !busy && (
+          <div
+            className="st-export-status"
+            role="status"
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            {exportStatus}
+            {!exportingPackage && (
+              <button
+                aria-label="关闭项目包导出提示"
+                onClick={() => setExportStatus("")}
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
+        )}
         {(saveError || uploading || busy) && (
           <div
             className="st-save-banner"
@@ -1490,9 +1756,88 @@ export default function AIStudio({
             transform: `translate(${view.x}px,${view.y}px) scale(${view.zoom})`,
           }}
         >
+          {sections.map((section, index) => (
+            <article
+              key={section.id}
+              data-board-id={section.id}
+              className={`st-section ${selection.includes(section.id) ? "is-selected" : ""}`}
+              style={{
+                left: section.position.x,
+                top: section.position.y,
+                width: section.width,
+                height: section.height,
+                "--item-color": section.color,
+              }}
+              onPointerDown={(event) => startPointer(event, section)}
+            >
+              <div className="st-section-header">
+                <button
+                  aria-label={`选中分区 ${index + 1} ${section.title}`}
+                  onClick={(event) => selectResult(section.id, event)}
+                >
+                  <SquareDashed size={15} />
+                  <span>{section.title}</span>
+                </button>
+                <span className="st-section-grip" title="拖动分区及其中内容">
+                  {section.itemIds.length} 项
+                </span>
+              </div>
+            </article>
+          ))}
+          {notes.map((note, index) => (
+            <article
+              key={note.id}
+              data-board-id={note.id}
+              className={`st-note ${selection.includes(note.id) ? "is-selected" : ""}`}
+              style={{
+                left: note.position.x,
+                top: note.position.y,
+                width: note.width,
+                height: note.height,
+                background: note.color,
+              }}
+              onPointerDown={(event) => startPointer(event, note)}
+            >
+              <div className="st-note-header">
+                <button
+                  aria-label={`选中便签 ${index + 1}`}
+                  onClick={(event) => selectResult(note.id, event)}
+                >
+                  <StickyNote size={13} />
+                  便签 {index + 1}
+                </button>
+                <span title="拖动便签">⠿</span>
+              </div>
+              {editingNote === note.id ? (
+                <textarea
+                  autoFocus
+                  aria-label="画布便签内容"
+                  maxLength={10000}
+                  value={note.text}
+                  onChange={(event) =>
+                    updateItem(note.id, { text: event.target.value })
+                  }
+                  onBlur={() => setEditingNote(null)}
+                  placeholder="记下你的想法…"
+                />
+              ) : (
+                <div
+                  className={`st-note-content ${!note.text ? "is-placeholder" : ""}`}
+                  onDoubleClick={(event) => {
+                    event.stopPropagation();
+                    selectResult(note.id);
+                    setEditingNote(note.id);
+                  }}
+                >
+                  {note.text || "双击记下你的想法…"}
+                </div>
+              )}
+            </article>
+          ))}
           {results.map((r, i) => (
             <article
               key={r.id}
+              data-board-id={r.id}
               className={`st-result ${selection.includes(r.id) ? "is-selected" : ""}`}
               style={{ left: r.position.x, top: r.position.y }}
               onPointerDown={(e) => startPointer(e, r)}
@@ -1546,6 +1891,186 @@ export default function AIStudio({
             </article>
           ))}
         </div>
+        {selected && !panel && (selectedItem || selectedResult) && (
+          <aside
+            className="st-item-inspector"
+            aria-label="画布内容属性"
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <header>
+              <strong>
+                {selectedNote ? "便签" : selectedSection ? "分区" : "画板分区"}
+              </strong>
+              <small>
+                {selection.length > 1
+                  ? `已选 ${selection.length} 项`
+                  : "内容属性"}
+              </small>
+              <IconButton
+                label="关闭内容属性"
+                onClick={() => {
+                  setSelected(null);
+                  setSelection([]);
+                  setEditingNote(null);
+                }}
+              >
+                <X size={13} />
+              </IconButton>
+            </header>
+            {selectedNote && (
+              <label className="st-board-field st-board-text-field">
+                <span>内容</span>
+                <textarea
+                  aria-label="便签内容"
+                  maxLength={10000}
+                  value={selectedNote.text}
+                  placeholder="记下你的想法…"
+                  onChange={(event) =>
+                    updateItem(selectedNote.id, { text: event.target.value })
+                  }
+                />
+              </label>
+            )}
+            {selectedSection && (
+              <label className="st-board-field st-board-text-field">
+                <span>分区名称</span>
+                <input
+                  aria-label="分区标题"
+                  maxLength={120}
+                  value={selectedSection.title}
+                  onChange={(event) =>
+                    updateItem(selectedSection.id, {
+                      title: event.target.value,
+                    })
+                  }
+                />
+              </label>
+            )}
+            {selectedItem && (
+              <>
+                <div className="st-board-dimensions">
+                  <BoardSizeField
+                    label={`${selectedNote ? "便签" : "分区"}宽度`}
+                    value={selectedItem.width}
+                    min={selectedNote ? 160 : 240}
+                    max={selectedNote ? 2000 : 20000}
+                    onCommit={(width) => updateItem(selectedItem.id, { width })}
+                  />
+                  <BoardSizeField
+                    label={`${selectedNote ? "便签" : "分区"}高度`}
+                    value={selectedItem.height}
+                    min={selectedNote ? 100 : 160}
+                    max={selectedNote ? 3000 : 20000}
+                    onCommit={(height) =>
+                      updateItem(selectedItem.id, { height })
+                    }
+                  />
+                </div>
+                <label className="st-board-field st-board-color-field">
+                  <span>颜色</span>
+                  <input
+                    type="color"
+                    aria-label={selectedNote ? "便签颜色" : "分区颜色"}
+                    value={selectedItem.color}
+                    onChange={(event) =>
+                      updateItem(selectedItem.id, {
+                        color: event.target.value.toUpperCase(),
+                      })
+                    }
+                  />
+                  <small>{selectedItem.color}</small>
+                </label>
+              </>
+            )}
+            {selectedSection && (
+              <div className="st-section-members">
+                <span>分区内容 · {selectedSection.itemIds.length}</span>
+                {selectedSection.itemIds.map((id) => {
+                  const member =
+                    results.find((item) => item.id === id) ||
+                    notes.find((item) => item.id === id);
+                  return (
+                    <div key={id}>
+                      <span>
+                        {member?.title || member?.text?.slice(0, 30) || "便签"}
+                      </span>
+                      <button
+                        aria-label={`从分区移出 ${id}`}
+                        title="移出分区"
+                        onClick={() => removeFromSections([id])}
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {selection.some(
+              (id) =>
+                results.some((r) => r.id === id) ||
+                notes.some((n) => n.id === id),
+            ) && (
+              <div className="st-section-membership">
+                <button className="st-board-inline-action" onClick={addSection}>
+                  <FolderPlus size={13} />
+                  用选中内容创建分区
+                </button>
+                {sections.length > 0 && (
+                  <>
+                    <label className="st-board-field">
+                      <span>目标分区</span>
+                      <select
+                        aria-label="目标分区"
+                        value={
+                          sections.some(
+                            (section) => section.id === targetSection,
+                          )
+                            ? targetSection
+                            : sections[0].id
+                        }
+                        onChange={(event) =>
+                          setTargetSection(event.target.value)
+                        }
+                      >
+                        {sections.map((section) => (
+                          <option key={section.id} value={section.id}>
+                            {section.title || "未命名分区"}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      className="st-board-inline-action"
+                      onClick={() =>
+                        joinSection(
+                          sections.some(
+                            (section) => section.id === targetSection,
+                          )
+                            ? targetSection
+                            : sections[0].id,
+                        )
+                      }
+                    >
+                      加入目标分区
+                    </button>
+                    <button
+                      className="st-board-inline-action st-board-muted-action"
+                      onClick={() => removeFromSections()}
+                    >
+                      从分区移出选中内容
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+            {selectedSection && (
+              <p className="st-section-help">
+                拖动分区会带上其中内容。删除分区后，内容仍留在画布上。
+              </p>
+            )}
+          </aside>
+        )}
         {selectedResult && !panel && (
           <div className="st-refine-bar">
             <Sparkles size={14} />
@@ -1588,6 +2113,20 @@ export default function AIStudio({
             <Plus size={18} />
           </IconButton>
           <IconButton
+            label="添加便签"
+            disabled={busy || uploading || conflicted}
+            onClick={addNote}
+          >
+            <StickyNote size={18} />
+          </IconButton>
+          <IconButton
+            label="创建分区"
+            disabled={busy || uploading || conflicted}
+            onClick={addSection}
+          >
+            <SquareDashed size={18} />
+          </IconButton>
+          <IconButton
             label="添加设计模板"
             onClick={() => togglePanel("templates")}
           >
@@ -1620,28 +2159,28 @@ export default function AIStudio({
             <Redo2 size={16} />
           </IconButton>
           <IconButton
-            label="复制选中画板"
+            label="复制选中内容"
             disabled={!selection.length || busy || uploading || conflicted}
             onClick={duplicateSelected}
           >
             <Copy size={16} />
           </IconButton>
           <IconButton
-            label="移除选中画板"
+            label="删除选中内容"
             disabled={!selection.length || busy || conflicted}
             onClick={removeSelected}
           >
             <Trash2 size={16} />
           </IconButton>
           <IconButton
-            label="选中画板左对齐"
+            label="选中内容左对齐"
             disabled={selection.length < 2 || busy || conflicted}
             onClick={() => alignSelected("x")}
           >
             <AlignLeft size={16} />
           </IconButton>
           <IconButton
-            label="选中画板顶部对齐"
+            label="选中内容顶部对齐"
             disabled={selection.length < 2 || busy || conflicted}
             onClick={() => alignSelected("y")}
           >
@@ -1669,9 +2208,10 @@ export default function AIStudio({
             <Expand size={16} />
           </IconButton>
         </div>
-        {results.length > 0 && (
+        {(results.length > 0 || notes.length > 0 || sections.length > 0) && (
           <span className="st-canvas-count">
-            {results.length} 个画板 · Shift 多选 · 拖动标题吸附网格
+            {results.length} 个画板 · {notes.length} 个便签 · {sections.length}{" "}
+            个分区 · Shift 多选
           </span>
         )}
         {panel && (

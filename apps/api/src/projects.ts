@@ -1,4 +1,5 @@
 import { recordOps } from '../../../packages/server-domain/src/document-ops.js';
+import { BoardPositionSchema } from '../../../packages/doc-core/src/board.js';
 import { idempotent } from '../../../packages/server-domain/src/idempotency.js';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -33,9 +34,10 @@ export async function projectRoutes(app:FastifyInstance) {
  app.post('/api/projects/:id/artboards',async(req:any)=>tenantTransaction(req.identity.workspace.id,async tx=>{
   const projectId=params(req).id;await getProject(tx,projectId);
   const body=req.body||{},design=validateDesign(body.design||blankDesign()),title=z.string().trim().min(1).max(200).parse(body.title||'自由画板');
+  const position=BoardPositionSchema.parse(body.position||{x:0,y:0});
   const doc=(await tx.query("INSERT INTO documents(id,workspace_id,project_id,kind,title,content) VALUES($1,$2,$3,'artboard',$4,$5) RETURNING *",[id(),req.identity.workspace.id,projectId,title,JSON.stringify(design)])).rows[0];
   await syncAssetRefs(tx,req.identity.workspace.id,doc.id,design);await saveVersion(tx,req.identity.workspace.id,doc,'初始版本');
-  const dto=artboardDto(doc,body.position||{x:0,y:0});
+  const dto=artboardDto(doc,position);
   await tx.query("UPDATE documents SET content=jsonb_set(content,'{results}',coalesce(content->'results','[]'::jsonb)||$1::jsonb),revision=revision+1 WHERE project_id=$2 AND kind='board'",[JSON.stringify([{...dto,design:undefined}]),projectId]);
   await emit(tx,req.identity.workspace.id,'artboard.created',{projectId,documentId:doc.id});return dto;
  }));

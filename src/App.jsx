@@ -982,7 +982,7 @@ export default function App({
   async function openProject(p) {
     try {
       const board = await api("/projects/" + p.id + "/studio");
-      if (board.snapshot?.results?.length) {
+      if (board.snapshot?.results?.length || board.snapshot?.notes?.length || board.snapshot?.sections?.length) {
         await restoreStudio(p.id);
         history.pushState(null, "", "#studio/" + p.id);
       } else await edit(p);
