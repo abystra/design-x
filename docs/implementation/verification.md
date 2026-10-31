@@ -43,6 +43,8 @@ pnpm test:api
 pnpm test:e2e
 pnpm test:editor
 pnpm test:render
+pnpm test:board
+pnpm test:import
 ```
 
 - `test:unit`：文档 diff/apply 往返与逆向恢复、120 步编辑历史、源文档不被修改、唯一图层 ID、无效排序、尺寸变换、素材引用去重及路径边界。
@@ -50,8 +52,14 @@ pnpm test:render
 - `test:e2e`（`non_ai_journey.py`）：注册个人空间 → 模板实例化 → 中文文本编辑并保存 → 清空 localStorage 后刷新重开 → 上传/摄取并写入资产引用 → 命名版本/恢复 → PNG/PDF 下载 → 文件夹归档/品牌保存 → AI 未接入状态 → 注销重登 → 第二账号资源隔离。
 - `test:editor`（`editor_interactions.py`）：分组/解除分组、对齐、旋转、裁切、画布尺寸、复制/删除与逆向历史，以及未提交草稿恢复、浏览器模拟离线和双标签冲突。是否通过以实际执行记录为准。
 - `test:render`（`render_consistency.mjs`）：比较两份固定文档在实际编辑器 DOM 与独立 Renderer 中的 PNG，覆盖中英文字体/换行、图片适配、旋转、透明度、裁切、隐藏；这是同机 Chromium、1× 的有限样本。
+- `test:board`（`board_features.py`）：便签/分区、显式成员加入移出、混合拖动去重、复制 ID 映射、删除分区保留内容、撤销重做/刷新、真实 409 草稿下载、`.dxproj` 真实下载及空Board从项目列表重开。`--core` 只跑 5 项早期检查并报告 `partial`，正式专项不要带该参数。
+- `test:import`（`project_import.py`）：双账户真实项目包导出/导入、Board-only素材、全量支持引用映射、私有权限、刷新续编与再导出、非法版本/文件、390px弹窗/焦点和关闭弹窗后后台完成入口。API准备真实夹具，UI完成导出、导入、编辑操作，无响应伪造。限制与结果见 [Board 与导入验收](board-import.md)。
 
 `pnpm check` 包含结构检查和原型规则/会话测试夹具，不代表产品已接入 AI。API 测试、浏览器旅程、专项交互和渲染对比是不同证据，不能互相代替。
+
+导入 API 集成测试会创建并删除临时独立数据库，因此测试连接需要 CREATEDB/删除自有测试数据库权限及迁移权限；默认 Compose 开发角色满足要求。测试只清理自己创建的数据库和 S3 前缀。真实浏览器套件应依次运行，不并行轰击同一开发 API；共享 IP 的每分钟限流可能令本应 404 的隔离断言收到 429。遇到时保留严格断言，等窗口恢复后单独重跑，不关闭限流或把 429 当成隔离测试通过。
+
+导入浏览器测试默认创建两个新隔离账户。重复验收触发注册限流时，可用 `python3 tests/e2e/project_import.py --accounts-file <测试凭据文件>` 复用此前专用测试账户进行真实 UI 登录，仍创建全新 fixture 项目并验证全部跨账户权限；报告会标记 `authenticationMode`，不能把登录结果写成注册成功。凭据文件仅临时保存在仓库外，权限设为 0600，用后删除，不提交、不写入验收报告。格式以脚本 `--help` 为准。
 
 PNG 检查真实文件签名、非空文件及像素尺寸；PDF 检查文件签名和完整结束标记。下载使用浏览器触发的真实导出任务，并核查对应任务成功。其他账号不得读取项目、版本、素材、缩略图、导出或修改项目。
 
@@ -71,6 +79,8 @@ PNG 检查真实文件签名、非空文件及像素尺寸；PDF 检查文件签
 - `report.json`：逐项 passed/failed/skipped、浏览器错误、HTTP 5xx 和项目 ID。
 - 页面截图、失败时的 DOM 文本、Playwright `trace.zip`。
 - 成功导出的 `export.png`、`export.pdf`。
+
+Board/导入专项分别使用 `board-<run-id>/`、`import-<run-id>/`，另保留 `.dxproj`、冲突草稿和对应报告。原生导入为 JSON v1，源文件40MiB、素材解码后合计30MiB；失败源包为支持重试保留在服务端，当前无定时保留期清理。使用专门测试环境并按测试运行记录管理数据。
 
 这些运行文件被 Git 忽略。测试创建独立的 `e2e-…@example.test` 账号，随机密码只存在运行进程内，不写报告。测试数据保留供复核，不自动清空已有数据库。重复运行可能触发注册限流；应使用专门测试环境，避免为通过测试关闭生产限流。
 

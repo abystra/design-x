@@ -53,6 +53,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--base-url', default=os.getenv('DESIGNX_E2E_URL', 'http://127.0.0.1:5173'))
     parser.add_argument('--output', type=Path)
+    parser.add_argument('--accounts-file', type=Path,
+        help='Optional private JSON file with a/b email/password test accounts; reuse via UI login to avoid registration rate limits.')
     args = parser.parse_args()
     run_id = time.strftime('%Y%m%d-%H%M%S') + '-' + uuid4().hex[:6]
     output = args.output or ROOT / 'tests/e2e/.artifacts' / ('import-' + run_id)
@@ -60,6 +62,9 @@ def main() -> int:
     executable = os.getenv('PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH') or subprocess.check_output(
         ['node', '-e', 'import("playwright").then(p=>console.log(p.chromium.executablePath()))'], cwd=ROOT, text=True).strip()
     report = {'runId': run_id, 'baseUrl': args.base_url, 'mocked': False, 'checks': [], 'projects': [], 'pageErrors': [], 'serverErrors': [], 'artifacts': []}
+    reused_accounts = json.loads(args.accounts_file.read_text()) if args.accounts_file else None
+    report['accountSetup'] = 'reuse isolated test accounts through UI login' if reused_accounts else 'register two isolated accounts through UI'
+    report['authenticationMode'] = 'login-reused-test-accounts' if reused_accounts else 'register-new-test-accounts'
     current = 'startup'
 
     def check(name, details=None):
@@ -81,11 +86,17 @@ def main() -> int:
             page.on('dialog', lambda dialog: dialog.accept())
             pages.append((label, page))
             page.goto(args.base_url, wait_until='domcontentloaded')
-            page.get_by_role('button', name='第一次来？创建账户').click()
-            page.get_by_label('你的名字').fill('项目导入验收 ' + label)
-            page.get_by_label('邮箱', exact=True).fill(f'import-{label}-{run_id}@example.test')
-            page.get_by_label('密码', exact=True).fill('Import-Test-' + uuid4().hex)
-            page.get_by_role('button', name='创建账户', exact=True).click()
+            if reused_accounts:
+                account = reused_accounts[label]
+                page.get_by_label('邮箱', exact=True).fill(account['email'])
+                page.get_by_label('密码', exact=True).fill(account['password'])
+                page.get_by_role('button', name='进入创作空间', exact=True).click()
+            else:
+                page.get_by_role('button', name='第一次来？创建账户').click()
+                page.get_by_label('你的名字').fill('项目导入验收 ' + label)
+                page.get_by_label('邮箱', exact=True).fill(f'import-{label}-{run_id}@example.test')
+                page.get_by_label('密码', exact=True).fill('Import-Test-' + uuid4().hex)
+                page.get_by_role('button', name='创建账户', exact=True).click()
             page.get_by_role('navigation', name='主导航').wait_for()
             return context, page
 

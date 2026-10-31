@@ -4,7 +4,7 @@
 
 AI 执行尚未接入。已确定的后续架构为 **E2B Sandbox → Harness → Codex SDK**，见 [ADR-0001](docs/adr/0001-codex-e2b.md)。产品入口如实显示未接入，不使用规则生成冒充模型能力。
 
-阶段 1 业务持久化与架构已提交 `44fcd0e`；阶段 2 UI 与非 AI 链路已提交 `ead7d15`。架构目录描述的长期目标不等于本阶段全部实现，具体完成度见 [阶段进度](docs/implementation/progress.md)。
+基础链路提交为 `44fcd0e`、`ead7d15`、`2bcc3f0`。本轮分三步交付：Board 便签/分区 `5f7a263`，持久化项目导入 `2291383`，最后汇总验收与文档。架构目录描述的长期目标不等于全部实现，具体完成度见 [阶段进度](docs/implementation/progress.md)。
 
 ## 本地启动
 
@@ -31,12 +31,15 @@ pnpm dev:all
 ## 可用旅程
 
 1. 模板灵感 → 预览模板 → 使用模板 → 修改文字/图片/图层 → 自动或手动保存 → 刷新重开。
-2. 开始创作 → Board → 添加空白画板、模板或素材 → 平移缩放、多选、对齐、复制/移除、撤销重做 → 精细编辑 → 返回原画布。
+2. 开始创作 → Board → 添加画板、模板、素材或便签 → 创建分区并管理成员 → 平移缩放、多选、对齐、复制/移除、撤销重做 → 精细编辑 → 返回原画布。移动分区带动成员，删除分区保留内容；成员通过明确加入/移出改变归属。
 3. 资产库 → 上传真实图片 → 后台校验/缩略图 → 素材引用；管理收藏、创作参考、品牌色、字体和 Logo。
 4. 项目 → 文件夹、重命名、移动、最近打开、回收站和恢复。注销后重登仍保留。
 5. 编辑器 → 命名版本 / 恢复 → 导出 PNG、JPEG、WebP、单页 PDF、原生 `.dxproj`；右上角创作动态查看后台状态、重试和下载。SVG 另有 API 导出，采用含 DOM 的 `foreignObject`，不作为通用矢量编辑器交换格式承诺。
+6. Board → 项目包下载 → 另一账户“我的项目”导入 → 后台重建新项目、文档及私有素材 → 打开继续编辑。关闭导入弹窗后已接收的任务仍继续，可从创作动态打开结果。
 
 素材上限每张 10 MiB，PNG/JPEG/WebP/GIF；GIF 摄取首帧。被设计、历史版本或品牌/参考引用的素材不能删除。导出绑定提交时的版本，后续编辑不改变已排队文件。断网时已打开编辑器的未同步改动缓存在 IndexedDB，恢复网络后可重试；冲突提供保留副本或使用最新版本。
+
+原生项目包为 JSON v1（不是 ZIP）：源文件最多 40 MiB，内嵌素材解码后合计 30 MiB、单图 10 MiB，最多 100 张画板、200 个素材、10,000 个图层；未知版本拒绝。图片实际解码并保存为新空间的私有文件。失败源包保留供任务重试，尚未提供长期失败文件的定时清理。完整限制及实测范围见 [Board 与导入说明](docs/implementation/board-import.md)。
 
 ## 验证
 
@@ -53,6 +56,8 @@ python3 -m pip install -r tests/e2e/requirements.txt
 pnpm test:e2e
 pnpm test:editor
 pnpm test:render
+pnpm test:board
+pnpm test:import
 ```
 
 `pnpm check` 包含页面结构检查以及保留的原型规则/会话测试夹具；这些夹具不参与产品执行，也不能代替真实服务验收。完整浏览器步骤、实际结果与限制见 [验收指南](docs/implementation/verification.md)、[执行记录](docs/implementation/verification-results.md)、[阶段进度](docs/implementation/progress.md)。
@@ -65,4 +70,4 @@ pnpm test:render
 - `packages/server-domain`、`server-infra`：领域业务、RLS、事务、队列和 S3。
 - `db/migrations`、`infra/compose`：可重放 SQL 迁移、本地 PostgreSQL / SeaweedFS。
 
-当前是可本地运行和联调的非 AI 版本，尚未作公网生产部署验收。`pnpm build` 只构建 Web 静态文件；API、Worker、Renderer 的生产镜像、进程管理、反向代理及部署流水线尚未交付。邮箱验证/找回、OTP、自动冲突 rebase、原生项目导入、定时素材 GC、多人实时协作和后续 AI 执行未实现。生产环境需独立配置数据库角色、存储凭证、HTTPS 和备份，不能使用示例开发密码。
+当前是可本地运行和联调的非 AI 版本，尚未作公网生产部署验收。`pnpm build` 只构建 Web 静态文件；API、Worker、Renderer 的生产镜像、进程管理、反向代理及部署流水线尚未交付。邮箱验证/找回、OTP、自动冲突 rebase、DOM Board 空间虚拟化、定时素材 GC、多人实时协作和后续 AI 执行未实现。生产环境需独立配置数据库角色、存储凭证、HTTPS 和备份，不能使用示例开发密码。

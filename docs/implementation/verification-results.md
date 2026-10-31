@@ -2,15 +2,19 @@
 
 执行日期：2026-10-31（America/Los_Angeles）。本记录只陈述实际运行的测试，不代表生产部署、全部架构目标或 AI 集成已经完成。
 
-交付基线：阶段 1 `44fcd0e`、阶段 2 `ead7d15`。API、编辑器与渲染专项以阶段 2 的业务实现为基线；完整浏览器旅程在阶段 3 项目缩略图改用共享渲染后再次执行。后续新增的验收脚本和说明以最终提交为准。
+交付基线：基础链路 `44fcd0e`、`ead7d15`、`2bcc3f0`；本轮 Board `5f7a263`、导入 `2291383`。本轮真实 API、Board、导入、完整旅程和渲染回归单列如下；编辑器14项是此前独立专项的已执行记录。最终脚本与说明随本轮验收提交。
 
 ## 工程检查
 
-最终执行 `pnpm typecheck`、`pnpm check`、`pnpm test:unit`、`pnpm build` 均通过；单元测试 7 项详情见下文。`pnpm install --frozen-lockfile --ignore-scripts` 成功，证明当前 pnpm 锁文件与清单对齐；该命令不代表全新机器的原生依赖安装与启动验证。
+本轮最终执行 `pnpm typecheck`、`pnpm check`、`pnpm test:unit`、`pnpm build` 均通过；单测共 10 项（文档核心 7 项、Board schema 3 项），分阶段结果见下文。`pnpm install --frozen-lockfile --ignore-scripts` 成功，证明当前 pnpm 锁文件与清单对齐；该命令不代表全新机器的原生依赖安装与启动验证。
 
-Web 构建仍有单个 JavaScript 包约 541 kB 的体积提示，以及 Zod 上游纯函数注释位置提示，未阻断构建。拆包和加载性能需要后续按真实负载优化。
+Web 构建仍有主 JavaScript 包超过 500 kB 的体积提示，以及 Zod 上游纯函数注释位置提示，未阻断构建。拆包和加载性能需要后续按真实负载优化。
 
 ## 真实 API / Worker / Renderer 回归
+
+本轮最终命令：`pnpm test:api`。Board/导入与缩略图导出修正后，后端验证者实际执行 **29/29 通过、0 失败、46.46 秒**（Board 4、Core 6、Import 10、Media 3、Safety 6）。停止长期 Worker/Renderer 后运行，测试自行创建真实独立子进程，结束后恢复后台进程 ready、API 健康 200。导入专项独立重跑 **10/10**、34.3 秒；原图 PNG/缩略图 WebP 导出 MIME 和 SHA256 分别匹配实际存储字节，导入后的标准化 PNG 哈希符合预期。事务失败回滚、幂等重试、暂存补偿和模拟中断 manifest 回收均有真实用例。
+
+以下 15 项为前一阶段的执行记录，保留用于区分历史范围：
 
 实际命令：`node --import tsx --test --test-concurrency=1 apps/api/tests/*.test.ts`，现已提供等价入口 `pnpm test:api`。
 
@@ -35,7 +39,7 @@ Web 构建仍有单个 JavaScript 包约 541 kB 的体积提示，以及 Zod 上
 
 命令：`python3 tests/e2e/non_ai_journey.py`
 
-最终运行 ID：`20261031-030639-e0cb55`。使用实际 Web 5173、API 3001、PostgreSQL、SeaweedFS、media worker 与 Chromium renderer；**无 HTTP mock，未使用 `--skip-exports`**。
+最终运行 ID：`20261031-033325-6f191f`（2291383 后重跑）。使用实际 Web 5173、API 3001、PostgreSQL、SeaweedFS、media worker 与 Chromium renderer；**无 HTTP mock，未使用 `--skip-exports`**。
 
 结果：**11/11 检查通过**，未捕获页面运行异常 0 条、HTTP 5xx 0 条。
 
@@ -53,14 +57,14 @@ Web 构建仍有单个 JavaScript 包约 541 kB 的体积提示，以及 Zod 上
 | 跨账户隔离 | 第二账号对他人项目/Board/版本/素材/缩略图/导出读取及项目修改返回 404；品牌为空，页面不显示他人作品 |
 | 运行错误检查 | 无未捕获页面异常、无 HTTP 5xx |
 
-本机证据在 `tests/e2e/.artifacts/20261031-030639-e0cb55/`，该目录被 Git 忽略：
+本机证据在 `tests/e2e/.artifacts/20261031-033325-6f191f/`，该目录被 Git 忽略：
 
-- [结构化报告](../../tests/e2e/.artifacts/20261031-030639-e0cb55/report.json)
-- [编辑器截图](../../tests/e2e/.artifacts/20261031-030639-e0cb55/02-editor.png)
-- [项目截图](../../tests/e2e/.artifacts/20261031-030639-e0cb55/03-projects.png)
-- [品牌截图](../../tests/e2e/.artifacts/20261031-030639-e0cb55/04-brand.png)
-- [AI 未接入状态](../../tests/e2e/.artifacts/20261031-030639-e0cb55/05-studio-ai-unavailable.png)
-- [PNG 文件](../../tests/e2e/.artifacts/20261031-030639-e0cb55/export.png)、[PDF 文件](../../tests/e2e/.artifacts/20261031-030639-e0cb55/export.pdf)
+- [结构化报告](../../tests/e2e/.artifacts/20261031-033325-6f191f/report.json)
+- [编辑器截图](../../tests/e2e/.artifacts/20261031-033325-6f191f/02-editor.png)
+- [项目截图](../../tests/e2e/.artifacts/20261031-033325-6f191f/03-projects.png)
+- [品牌截图](../../tests/e2e/.artifacts/20261031-033325-6f191f/04-brand.png)
+- [AI 未接入状态](../../tests/e2e/.artifacts/20261031-033325-6f191f/05-studio-ai-unavailable.png)
+- [PNG 文件](../../tests/e2e/.artifacts/20261031-033325-6f191f/export.png)、[PDF 文件](../../tests/e2e/.artifacts/20261031-033325-6f191f/export.pdf)
 - `trace.zip` 以及第二账号隔离截图。
 
 已实际查看编辑器与 AI 工作区截图，均有有效页面内容。截图有效不等于全部页面像素一致性通过。
@@ -83,9 +87,27 @@ Web 构建仍有单个 JavaScript 包约 541 kB 的体积提示，以及 Zod 上
 
 先前编辑器脚本把“收到失败响应”当成“服务端未提交”，导致等待保存响应超时。最终用例显式读取服务端 revision，并将确定未提交与提交结果不确定分开验证。此结果不代表完整离线应用、自动冲突合并或任意网络/进程故障都已覆盖。
 
+## Board 便签、分区与项目包专项
+
+在 Board 阶段 `5f7a263` 后实际执行 `python3 tests/e2e/board_features.py`，运行 ID `board-20261031-032903-85d955`：**17/17 通过，页面异常 0 条、HTTP 5xx 0 条、真实 409 一次**。
+
+覆盖便签文字/颜色/尺寸、创建分区、成员加入/移出、混合选区移动去重、复制的新 ID 与成员映射、删除分区保留内容、撤销/重做精确组织数据、刷新重开、冲突保留/下载草稿和实际 `.dxproj` 下载。项目包 4,126 字节，后台 Renderer 任务成功，包内便签、分区和 Artboard 文档与服务端一致。
+
+[结构化报告](../../tests/e2e/.artifacts/board-20261031-032903-85d955/report.json)及实际查看的[重开截图](../../tests/e2e/.artifacts/board-20261031-032903-85d955/03-organized-reopened.png)均保留于忽略目录。具体范围、先前 `--core` partial 记录与待验事项见 [Board/导入验收](board-import.md)。已补验清空全部内容后离开并从项目列表重开，仍进入空 Studio，隐藏主画板未被误删；跨账户导入见下节。
+
+## 跨账户原生项目导入专项
+
+实施者在 `2291383` 后执行 `python3 tests/e2e/project_import.py --accounts-file <私有临时测试凭据文件>`，报告 `import-20261031-033751-4b8b83` 已读取：**11/11 通过，页面异常 0 条、HTTP 5xx 0 条，无 mock**。`authenticationMode=login-reused-test-accounts`，通过真实 UI 登录此前本测试创建的两隔离账户，全部 fixture 项目为新建，不计为再次注册通过。真实 Board UI 导出 2,499,070 字节项目包（2 PNG + 1 WebP 缩略图）；另一个账户经“我的项目”导入，验证新文档/条目/图层/组合/资产及 Board 元数据引用映射和双向 404 隔离。刷新续编并再次导出 2,563,169 字节。
+
+同时验证非法 JSON/未知版本不新增项目或任务、390px长文件名弹窗/焦点循环/ESC回焦、关闭弹窗后后台完成并从创作动态打开。项目页三按钮在窄屏横向溢出已修复，随后完整重跑通过；执行者实际查看移动截图。[报告](../../tests/e2e/.artifacts/import-20261031-033751-4b8b83/report.json)、[导入后 Board](../../tests/e2e/.artifacts/import-20261031-033751-4b8b83/02-imported-board.png)、[390px 弹窗](../../tests/e2e/.artifacts/import-20261031-033751-4b8b83/03-mobile-import-dialog.png)。缩略图路径字节保真由修正后的 API MIME/hash 用例另行证明。
+
+`.dxproj` 是 JSON v1，不是 ZIP；源文件40MiB、解码后素材总量30MiB，未知版本拒绝，失败源文件保留供重试。详细实现边界和仍未覆盖项见 [Board/导入说明](board-import.md)。
+
+前两次复跑分别受到并发测试共用 IP 的 600/min 全局限流、重复创建账户的 12次/15分钟注册限流影响，得到 429 后原断言仍判失败。最终独立运行复用隔离测试账号完成全部严格 404 断言，未修改限流或重启服务；临时 0600 凭据文件已删除，报告只记录认证模式，不记录凭据内容。
+
 ## 编辑器与导出的有限渲染对比
 
-实际命令：`node tests/e2e/render_consistency.mjs`，现提供入口 `pnpm test:render`。运行 ID：`render-1793440851347`。
+实际命令：`node tests/e2e/render_consistency.mjs`，现提供入口 `pnpm test:render`。运行 ID：`render-1793442805571`（2291383 后重跑）。
 
 结果：**2/2 通过，页面运行异常 0 条**。两份文档均比较真实浏览器编辑器 DOM 截图与独立 Renderer 任务产生的 PNG；只归一化编辑器画板的视口位置与缩放，保留内容样式。
 
@@ -94,7 +116,7 @@ Web 构建仍有单个 JavaScript 包约 541 kB 的体积提示，以及 Zod 上
 | 600 × 500 | 中文/英文、衬线、自动换行、图片 cover | `changedPixelRatio = 0`，`meanMaxChannelDelta = 0` |
 | 480 × 400 | 旋转、透明度、图片 contain、越界裁切、隐藏图层 | `changedPixelRatio = 0`，`meanMaxChannelDelta = 0` |
 
-证据：[对比报告](../../tests/e2e/.artifacts/render-1793440851347/report.json)，同目录保留两组 editor/export PNG。本项是同机 Chromium、1×、两份样本的结果；不是完整 50 份金样、跨浏览器、跨操作系统或所有字体的渲染一致性证明，也不是原型页面像素差异验收。
+证据：[对比报告](../../tests/e2e/.artifacts/render-1793442805571/report.json)，同目录保留两组 editor/export PNG。本项是同机 Chromium、1×、两份样本的结果；不是完整 50 份金样、跨浏览器、跨操作系统或所有字体的渲染一致性证明，也不是原型页面像素差异验收。
 
 ## 原型视觉复核
 

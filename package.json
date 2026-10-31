@@ -21,7 +21,9 @@
     "test:unit": "tsx --test tests/unit/*.test.ts",
     "test:e2e": "python3 tests/e2e/non_ai_journey.py",
     "test:editor": "python3 tests/e2e/editor_interactions.py",
-    "test:render": "node tests/e2e/render_consistency.mjs"
+    "test:render": "node tests/e2e/render_consistency.mjs",
+    "test:board": "python3 tests/e2e/board_features.py",
+    "test:import": "python3 tests/e2e/project_import.py"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1161.0",
