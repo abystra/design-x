@@ -4,17 +4,20 @@ import { idempotent } from '../../../packages/server-domain/src/idempotency.js';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { tenantTransaction } from '../../../packages/server-infra/src/db.js';
-import { createProject,patchProject,getProject,projectDto,studioSnapshot,saveStudio,artboardDto } from '../../../packages/server-domain/src/projects.js';
+import { createProject,patchProject,getProject,getProjectMetadata,projectDto,studioSnapshot,saveStudio,artboardDto } from '../../../packages/server-domain/src/projects.js';
 import { id,notFound,emit,validateDesign,saveVersion,syncAssetRefs,HttpError,blankDesign,jobDto } from '../../../packages/server-domain/src/common.js';
 const params=(req:any)=>req.params as Record<string,string>;
+const projectView=z.enum(['full','metadata']).default('full');
+const studioResponse=z.enum(['full','ack']).default('full');
 export async function projectRoutes(app:FastifyInstance) {
  app.get('/api/projects',async(req:any)=>tenantTransaction(req.identity.workspace.id,async tx=>{
   const trash=(req.query as any)?.trash==='1';
-  const rows=(await tx.query(`SELECT p.*,d.content as design,d.revision,d.id as document_id FROM projects p LEFT JOIN documents d ON d.id=p.primary_artboard_id WHERE p.deleted_at IS ${trash?'NOT ':''}NULL ORDER BY p.updated_at DESC LIMIT 1000`)).rows;
+  const metadata=projectView.parse(req.query?.view)==='metadata';
+  const rows=(await tx.query(`SELECT p.*,${metadata?'':'d.content as design,'}d.revision,d.id as document_id FROM projects p LEFT JOIN documents d ON d.id=p.primary_artboard_id WHERE p.deleted_at IS ${trash?'NOT ':''}NULL ORDER BY p.updated_at DESC LIMIT 1000`)).rows;
   return rows.map(projectDto);
  }));
  app.post('/api/projects',async(req:any,reply)=>{const result=await tenantTransaction(req.identity.workspace.id,tx=>idempotent(tx,req.identity.workspace.id,req.headers['idempotency-key'],{route:'project.create',body:req.body},()=>createProject(tx,req.identity.workspace.id,req.body||{})));reply.code(201);return result;});
- app.get('/api/projects/:id',async(req:any)=>tenantTransaction(req.identity.workspace.id,async tx=>projectDto(await getProject(tx,params(req).id))));
+ app.get('/api/projects/:id',async(req:any)=>tenantTransaction(req.identity.workspace.id,async tx=>projectDto(await (projectView.parse(req.query?.view)==='metadata'?getProjectMetadata:getProject)(tx,params(req).id))));
  app.patch('/api/projects/:id',async(req:any)=>tenantTransaction(req.identity.workspace.id,tx=>patchProject(tx,req.identity.workspace.id,params(req).id,req.body||{})));
  app.delete('/api/projects/:id',async(req:any)=>tenantTransaction(req.identity.workspace.id,async tx=>{
   await getProject(tx,params(req).id);await tx.query('UPDATE projects SET deleted_at=now() WHERE id=$1',[params(req).id]);
@@ -30,16 +33,20 @@ export async function projectRoutes(app:FastifyInstance) {
   await getProject(tx,params(req).id);await tx.query('UPDATE projects SET last_opened_at=now() WHERE id=$1',[params(req).id]);return {ok:true};
  }));
  app.get('/api/projects/:id/studio',async(req:any)=>tenantTransaction(req.identity.workspace.id,tx=>studioSnapshot(tx,params(req).id)));
- app.put('/api/projects/:id/studio',async(req:any)=>tenantTransaction(req.identity.workspace.id,tx=>saveStudio(tx,req.identity.workspace.id,params(req).id,req.body||{})));
+ app.put('/api/projects/:id/studio',async(req:any)=>{
+  const acknowledgeOnly=studioResponse.parse(req.query?.response)==='ack';
+  return tenantTransaction(req.identity.workspace.id,tx=>saveStudio(tx,req.identity.workspace.id,params(req).id,req.body||{},acknowledgeOnly));
+ });
  app.post('/api/projects/:id/artboards',async(req:any)=>tenantTransaction(req.identity.workspace.id,async tx=>{
-  const projectId=params(req).id;await getProject(tx,projectId);
+  const projectId=params(req).id;await getProjectMetadata(tx,projectId);
   const body=req.body||{},design=validateDesign(body.design||blankDesign()),title=z.string().trim().min(1).max(200).parse(body.title||'自由画板');
   const position=BoardPositionSchema.parse(body.position||{x:0,y:0});
   const doc=(await tx.query("INSERT INTO documents(id,workspace_id,project_id,kind,title,content) VALUES($1,$2,$3,'artboard',$4,$5) RETURNING *",[id(),req.identity.workspace.id,projectId,title,JSON.stringify(design)])).rows[0];
   await syncAssetRefs(tx,req.identity.workspace.id,doc.id,design);await saveVersion(tx,req.identity.workspace.id,doc,'初始版本');
   const dto=artboardDto(doc,position);
-  await tx.query("UPDATE documents SET content=jsonb_set(content,'{results}',coalesce(content->'results','[]'::jsonb)||$1::jsonb),revision=revision+1 WHERE project_id=$2 AND kind='board'",[JSON.stringify([{...dto,design:undefined}]),projectId]);
-  await emit(tx,req.identity.workspace.id,'artboard.created',{projectId,documentId:doc.id});return dto;
+  const board=(await tx.query("UPDATE documents SET content=jsonb_set(content,'{results}',coalesce(content->'results','[]'::jsonb)||$1::jsonb),revision=revision+1 WHERE project_id=$2 AND kind='board' RETURNING revision",[JSON.stringify([{...dto,design:undefined}]),projectId])).rows[0];
+  if(!board)notFound();
+  await emit(tx,req.identity.workspace.id,'artboard.created',{projectId,documentId:doc.id});return {...dto,boardRevision:board.revision};
  }));
  app.patch('/api/projects/:id/artboards/:artboardId',async(req:any)=>tenantTransaction(req.identity.workspace.id,async tx=>{
   const p=params(req),body=req.body||{};await getProject(tx,p.id);

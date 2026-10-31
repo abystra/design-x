@@ -7,13 +7,15 @@ import { getObject } from '../../../packages/server-infra/src/storage.js';
 import { createJob } from '../../../packages/server-domain/src/jobs.js';
 import { getProject } from '../../../packages/server-domain/src/projects.js';
 import { id,jobDto,HttpError,notFound,emit } from '../../../packages/server-domain/src/common.js';
+// Export payloads can contain every design in a project; status reads never need them.
+const jobStatusColumns='id,project_id,kind,status,progress,error,result,attempts,created_at,updated_at';
 export async function taskRoutes(app:FastifyInstance) {
  app.get('/api/jobs',async(req:any)=>tenantTransaction(req.identity.workspace.id,async tx=>{
   const projectId=req.query.projectId||req.query.project_id;
-  const rows=projectId?(await tx.query("SELECT * FROM jobs WHERE project_id=$1 AND EXISTS (SELECT 1 FROM projects p WHERE p.id=jobs.project_id AND p.deleted_at IS NULL) ORDER BY created_at DESC LIMIT 200",[projectId])).rows:(await tx.query("SELECT * FROM jobs WHERE project_id IS NULL OR EXISTS (SELECT 1 FROM projects p WHERE p.id=jobs.project_id AND p.deleted_at IS NULL) ORDER BY created_at DESC LIMIT 200")).rows;
+  const rows=projectId?(await tx.query(`SELECT ${jobStatusColumns} FROM jobs WHERE project_id=$1 AND EXISTS (SELECT 1 FROM projects p WHERE p.id=jobs.project_id AND p.deleted_at IS NULL) ORDER BY created_at DESC LIMIT 200`,[projectId])).rows:(await tx.query(`SELECT ${jobStatusColumns} FROM jobs WHERE project_id IS NULL OR EXISTS (SELECT 1 FROM projects p WHERE p.id=jobs.project_id AND p.deleted_at IS NULL) ORDER BY created_at DESC LIMIT 200`)).rows;
   return rows.map(jobDto);
  }));
- app.get('/api/jobs/:id',async(req:any)=>tenantTransaction(req.identity.workspace.id,async tx=>{const job=(await tx.query("SELECT * FROM jobs WHERE id=$1 AND (project_id IS NULL OR EXISTS (SELECT 1 FROM projects p WHERE p.id=jobs.project_id AND p.deleted_at IS NULL))",[req.params.id])).rows[0];if(!job)notFound();return jobDto(job);}));
+ app.get('/api/jobs/:id',async(req:any)=>tenantTransaction(req.identity.workspace.id,async tx=>{const job=(await tx.query(`SELECT ${jobStatusColumns} FROM jobs WHERE id=$1 AND (project_id IS NULL OR EXISTS (SELECT 1 FROM projects p WHERE p.id=jobs.project_id AND p.deleted_at IS NULL))`,[req.params.id])).rows[0];if(!job)notFound();return jobDto(job);}));
  app.post('/api/jobs/:id/retry',async(req:any)=>tenantTransaction(req.identity.workspace.id,async tx=>{
   const current=(await tx.query("SELECT * FROM jobs WHERE id=$1 AND (project_id IS NULL OR EXISTS (SELECT 1 FROM projects p WHERE p.id=jobs.project_id AND p.deleted_at IS NULL)) FOR UPDATE",[req.params.id])).rows[0];if(!current)notFound();
   if(!['failed','cancelled'].includes(current.status))throw new HttpError(409,'INVALID_JOB_STATE','只有失败或取消的任务可以重试');

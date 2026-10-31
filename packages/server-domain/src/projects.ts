@@ -4,7 +4,13 @@ import { z } from 'zod';
 import type { Tx } from '../../server-infra/src/db.js';
 import { id, blankDesign, validateDesign, syncAssetRefs, saveVersion, emit, HttpError, notFound } from './common.js';
 export async function getProject(tx:Tx,projectId:string,includeDeleted=false) {
- const {rows}=await tx.query(`SELECT p.*, d.content AS design,d.revision,d.id as document_id FROM projects p LEFT JOIN documents d ON d.id=p.primary_artboard_id WHERE p.id=$1 ${includeDeleted?'':'AND p.deleted_at IS NULL'}`,[projectId]);
+ return readProject(tx,projectId,includeDeleted,true);
+}
+export async function getProjectMetadata(tx:Tx,projectId:string,includeDeleted=false) {
+ return readProject(tx,projectId,includeDeleted,false);
+}
+async function readProject(tx:Tx,projectId:string,includeDeleted:boolean,includeDesign:boolean) {
+ const {rows}=await tx.query(`SELECT p.*, ${includeDesign?'d.content AS design,':''}d.revision,d.id as document_id FROM projects p LEFT JOIN documents d ON d.id=p.primary_artboard_id WHERE p.id=$1 ${includeDeleted?'':'AND p.deleted_at IS NULL'}`,[projectId]);
  if(!rows[0])notFound();return rows[0];
 }
 export function projectDto(p:any) {return {id:p.id,projectId:p.id,documentId:p.document_id,title:p.title,type:p.type,image:p.image,color:p.color,folderId:p.folder_id,design:p.design,revision:p.revision,persisted:true,updatedAt:p.updated_at,createdAt:p.created_at,lastOpenedAt:p.last_opened_at?new Date(p.last_opened_at).getTime():0,deletedAt:p.deleted_at};}
@@ -39,23 +45,31 @@ export async function patchProject(tx:Tx,workspaceId:string,projectId:string,inp
  return projectDto(await getProject(tx,projectId));
 }
 export async function studioSnapshot(tx:Tx,projectId:string) {
- await getProject(tx,projectId);
+ await getProjectMetadata(tx,projectId);
  const board=(await tx.query("SELECT * FROM documents WHERE project_id=$1 AND kind='board'",[projectId])).rows[0];
- const docs=(await tx.query("SELECT * FROM documents WHERE project_id=$1 AND kind='artboard'",[projectId])).rows;
+ if(!board)notFound();
+ return hydrateStudio(tx,projectId,board);
+}
+async function hydrateStudio(tx:Tx,projectId:string,board:any) {
+ const memberIds=(board.content.results||[]).map((result:any)=>result.id);
+ const docs=(await tx.query("SELECT id,project_id,title,content,revision FROM documents WHERE project_id=$1 AND kind='artboard' AND id=ANY($2::text[])",[projectId,memberIds])).rows;
  const byId=new Map(docs.map(d=>[d.id,d]));
  const results=(board.content.results||[]).filter((r:any)=>byId.has(r.id)).map((r:any)=>({...r,...artboardDto(byId.get(r.id),r.position)}));
  return {snapshot:{...board.content,results},revision:board.revision};
 }
-export async function saveStudio(tx:Tx,workspaceId:string,projectId:string,input:any) {
- await getProject(tx,projectId);
+export async function saveStudio(tx:Tx,workspaceId:string,projectId:string,input:any,acknowledgeOnly=false) {
+ await getProjectMetadata(tx,projectId);
  const board=(await tx.query("SELECT * FROM documents WHERE project_id=$1 AND kind='board' FOR UPDATE",[projectId])).rows[0];
+ if(!board)notFound();
  if(input.baseRevision!==board.revision)throw new HttpError(409,'DOC_REVISION_CONFLICT','工作区已更新，请刷新后重试');
  const snapshot=BoardSchema.parse(input.snapshot);
  if(Buffer.byteLength(JSON.stringify(snapshot))>5*1024*1024)throw new HttpError(413,'PAYLOAD_TOO_LARGE','工作区数据过大');
  // Board saves only organize existing Artboards. Their design contents remain authoritative in documents.
+ const memberIds=snapshot.results.map(result=>z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/).parse(result.id));
+ const members=(await tx.query('SELECT id,project_id,kind FROM documents WHERE id=ANY($1::text[])',[memberIds])).rows;
+ const byId=new Map(members.map(member=>[member.id,member]));
  for(const result of snapshot.results){
-  z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/).parse(result.id);
-  const existing=(await tx.query('SELECT * FROM documents WHERE id=$1',[result.id])).rows[0];
+  const existing=byId.get(result.id);
   if(existing){if(existing.project_id!==projectId||existing.kind!=='artboard')notFound();continue;}
   throw new HttpError(400,'UNKNOWN_ARTBOARD','请先创建画板，再加入工作区');
  }
@@ -65,5 +79,6 @@ export async function saveStudio(tx:Tx,workspaceId:string,projectId:string,input
  await recordOps(tx,workspaceId,updated,board.content);
  if(snapshot.title?.trim())await tx.query('UPDATE projects SET title=$1,updated_at=now() WHERE id=$2',[snapshot.title.trim(),projectId]);
  await emit(tx,workspaceId,'board.committed',{projectId,revision:board.revision+1});
- return studioSnapshot(tx,projectId);
+ if(acknowledgeOnly)return {projectId,documentId:updated.id,revision:updated.revision,updatedAt:updated.updated_at};
+ return hydrateStudio(tx,projectId,updated);
 }
