@@ -38,7 +38,7 @@ export async function taskRoutes(app:FastifyInstance) {
   const doc=(await tx.query("SELECT * FROM documents WHERE id=$1 AND project_id=$2 AND kind='artboard'",[body.documentId||project.document_id,project.id])).rows[0];if(!doc)notFound();
   if(doc.content.width*body.scale>16384||doc.content.height*body.scale>16384||doc.content.width*doc.content.height*body.scale**2>40000000)throw new HttpError(400,'EXPORT_TOO_LARGE','导出像素超出限制，请降低倍率');
   const documents=body.format==='dxproj'?(await tx.query('SELECT id,kind,title,content,revision FROM documents WHERE project_id=$1',[project.id])).rows:undefined;
-  const job=await idempotent(tx,req.identity.workspace.id,req.headers['idempotency-key'],{route:'export.create',projectId:project.id,body},()=>createJob(tx,req.identity.workspace.id,'render.export',{...body,format:body.format==='jpg'?'jpeg':body.format,documentId:doc.id,revision:doc.revision,design:doc.content,title:doc.title||project.title,documents},project.id));
+  const job=await idempotent(tx,req.identity.workspace.id,req.headers['idempotency-key'],{route:'export.create',projectId:project.id,body},()=>createJob(tx,req.identity.workspace.id,'render.export',{...body,format:body.format==='jpg'?'jpeg':body.format,documentId:doc.id,revision:doc.revision,design:doc.content,title:body.format==='dxproj'?project.title:doc.title||project.title,primaryArtboardId:project.document_id,documents},project.id));
   reply.code(202);return job;
  }));
  app.get('/api/exports/:id/file',async(req:any,reply)=>{

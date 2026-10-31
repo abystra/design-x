@@ -8,6 +8,7 @@ import { pool } from '../../../packages/server-infra/src/db.js';
 import { startQueue } from '../../../packages/server-infra/src/queue.js';
 import { HttpError } from '../../../packages/server-domain/src/common.js';
 import { authRoutes, requireIdentity } from './auth.js';
+import { importRoutes } from './imports.js';
 import { projectRoutes } from './projects.js';
 import { libraryRoutes } from './library.js';
 import { mediaRoutes } from './media.js';
@@ -37,7 +38,7 @@ export async function buildApp(options:{logger?:boolean}={}) {
  await app.register(authRoutes);
  await app.register(async privateApi=>{
   privateApi.addHook('preHandler',requireIdentity);
-  await privateApi.register(projectRoutes);await privateApi.register(documentRoutes);await privateApi.register(libraryRoutes);await privateApi.register(mediaRoutes);await privateApi.register(taskRoutes);
+  await privateApi.register(importRoutes);await privateApi.register(projectRoutes);await privateApi.register(documentRoutes);await privateApi.register(libraryRoutes);await privateApi.register(mediaRoutes);await privateApi.register(taskRoutes);
  });
  await startQueue();
  return app;

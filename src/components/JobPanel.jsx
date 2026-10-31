@@ -7,7 +7,7 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { api } from "../lib/api";
-export default function JobPanel({ onClose, onToast }) {
+export default function JobPanel({ onClose, onToast, onOpenProject }) {
   const [jobs, setJobs] = useState([]),
     [error, setError] = useState("");
   async function load() {
@@ -40,7 +40,9 @@ export default function JobPanel({ onClose, onToast }) {
         </button>
       </h3>
       {error && <p role="alert">{error}</p>}
-      {!jobs.length && <p>上传素材和导出作品后，可以在这里查看处理进度。</p>}
+      {!jobs.length && (
+        <p>上传素材、导入项目和导出作品后，可以在这里查看进度。</p>
+      )}
       {jobs.slice(0, 30).map((j) => (
         <article key={j.id} className="job-row">
           <div>
@@ -52,11 +54,13 @@ export default function JobPanel({ onClose, onToast }) {
               <RotateCcw size={17} />
             )}
             <b>
-              {j.kind?.startsWith("render")
-                ? "作品导出"
-                : j.kind?.startsWith("media")
-                  ? "素材处理"
-                  : j.kind}
+              {j.kind === "project.import"
+                ? "项目导入"
+                : j.kind?.startsWith("render")
+                  ? "作品导出"
+                  : j.kind?.startsWith("media")
+                    ? "素材处理"
+                    : j.kind}
             </b>
           </div>
           <span>
@@ -71,7 +75,7 @@ export default function JobPanel({ onClose, onToast }) {
           </span>
           {j.error && <small>{j.error}</small>}
           <div className="job-actions">
-            {j.status === "failed" && (
+            {["failed", "cancelled"].includes(j.status) && (
               <button onClick={() => action(j.id, "retry")}>重试</button>
             )}
             {["queued", "running"].includes(j.status) && (
@@ -86,6 +90,19 @@ export default function JobPanel({ onClose, onToast }) {
                 下载
               </a>
             )}
+            {j.status === "succeeded" &&
+              j.kind === "project.import" &&
+              j.result?.projectId &&
+              onOpenProject && (
+                <button
+                  onClick={() => {
+                    onClose();
+                    onOpenProject({ id: j.result.projectId });
+                  }}
+                >
+                  打开项目
+                </button>
+              )}
           </div>
         </article>
       ))}

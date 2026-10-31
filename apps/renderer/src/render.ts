@@ -1,3 +1,4 @@
+import { collectAssetSources,parsePortableProject } from '../../../packages/server-domain/src/import-format.js';
 import { readFile } from 'node:fs/promises';
 import { chromium,type Browser } from 'playwright';
 import sharp from 'sharp';
@@ -18,7 +19,8 @@ export async function embedSources(workspaceId:string,design:any){
   if(match){
    const asset=await tenantTransaction(workspaceId,async tx=>(await tx.query("SELECT * FROM assets WHERE id=$1 AND status='ready'",[match[1]])).rows[0]);
    if(!asset)throw new Error('导出引用的素材不存在');
-   const object=await getObject(asset.object_key);bytes=object.bytes;mime=object.contentType;
+   const key=node.src.endsWith('/thumbnail')?asset.thumbnail_key||asset.object_key:asset.object_key;
+   const object=await getObject(key);bytes=object.bytes;mime=object.contentType;
   }else if(/^\/assets\/(coffee|skincare|interior|fashion|headphones|nature)\.jpg$/.test(node.src)){
    bytes=await readFile(new URL(`../../../public${node.src}`,import.meta.url));mime='image/jpeg';
   }else throw new Error('导出仅允许已上传素材与内置示例');
@@ -35,8 +37,12 @@ export async function renderExport(job:any){
  if(format==='dxproj'){
   const documents=job.payload.documents||[{id:job.payload.documentId,kind:'artboard',content:design,revision:job.payload.revision}];
   const allSources=new Map(sources);
-  for(const doc of documents)if(doc.kind==='artboard'){for(const [src,data] of await embedSources(job.workspace_id,doc.content))allSources.set(src,data);}
-  bytes=Buffer.from(JSON.stringify({format:'designx.project',schemaVersion:1,title,documents,assets:Object.fromEntries(allSources)},null,2));mime='application/json';
+  const referenced=collectAssetSources(documents);
+  for(const [src,data] of await embedSources(job.workspace_id,{nodes:referenced.map(src=>({type:'image',src}))}))allSources.set(src,data);
+  const portable={format:'designx.project',schemaVersion:1,title,primaryArtboardId:job.payload.primaryArtboardId,documents,assets:Object.fromEntries(allSources)};
+  bytes=Buffer.from(JSON.stringify(portable,null,2));
+  parsePortableProject(bytes); // Export only self-contained packages that satisfy the documented import budgets.
+  mime='application/json';
  }else if(format==='svg'){
   // The same DOM renderer is embedded in SVG foreignObject; assets/fonts are self-contained.
   const body=html.slice(html.indexOf('<body>')+6,html.lastIndexOf('</body>'));
