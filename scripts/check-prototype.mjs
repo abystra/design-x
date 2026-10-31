@@ -42,5 +42,7 @@ for(const ratio of ['3:4','1:1','16:9','9:16']){assert.equal(initialDesign({blan
 assert.equal(getKind({name:'AI文案',category:'视频与内容'}),'text');
 assert.equal(getKind({name:'AI海报',category:'视频与内容'}),'graphic');
 console.log('PASS: preserved navigation, four Studio panels, shared preview, 100 catalog forms, 8 schema-valid templates and blank canvases. API/browser tests validate live behavior separately.');
+// The bundled canvas SDK owns idle timers; all SSR assertions above are synchronous.
+process.exit(0);
 `;
 try{await build({stdin:{contents:entry,resolveDir:process.cwd(),loader:'jsx'},bundle:true,platform:'node',format:'cjs',outfile:join(dir,'check.cjs'),loader:{'.css':'empty'},logLevel:'silent'});process.stdout.write(execFileSync(process.execPath,[join(dir,'check.cjs')],{encoding:'utf8'}));}finally{await rm(dir,{recursive:true,force:true});}

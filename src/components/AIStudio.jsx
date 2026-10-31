@@ -60,6 +60,7 @@ import {
 import { templates } from "../data/templates";
 import { initialDesign } from "./Editor";
 import BoardWorld, { DesignPreview } from "./BoardWorld";
+import TldrawBoard from "./TldrawBoard";
 export { DesignPreview } from "./BoardWorld";
 import "./ai-studio.css";
 
@@ -184,6 +185,13 @@ export default function AIStudio({
 }) {
   const snap = session.snapshot || {};
   const projectId = session.projectId || session.id;
+  const [boardEngine] = useState(() =>
+    new URLSearchParams(typeof window === "undefined" ? "" : window.location.search).get("boardEngine") === "legacy"
+      ? "legacy"
+      : "tldraw",
+  );
+  const nativeBoard = boardEngine === "tldraw";
+  const Canvas = nativeBoard ? TldrawBoard : BoardWorld;
   const [title, setTitle] = useState(snap.title || "新创作");
   const [messages, setMessages] = useState(
     (snap.messages || []).map((m) =>
@@ -362,6 +370,18 @@ export default function AIStudio({
     referenceDesign,
     saveDesign,
     finishGesture,
+    canvasCommit: (next, before) => commitBoard(next, before),
+    canvasSelection: (ids, active) => {
+      latest.current = { ...latest.current, selection: ids, selected: active };
+      setSelection(ids);
+      setSelected(active);
+    },
+    canvasView: (next) => {
+      liveView.current = next;
+      latest.current = { ...latest.current, view: next };
+      setView(next);
+    },
+    canvasInteractionStart: () => setSaveState("dirty"),
   };
 
   function enqueue(action) {
@@ -423,7 +443,7 @@ export default function AIStudio({
     const autosave = () => {
       // A gesture owns its temporary positions until pointer release. Saving
       // selection changes must not terminate a long drag or pan halfway through.
-      if (drag.current) {
+      if (drag.current || world.current?.isInteracting?.()) {
         saveTimer.current = setTimeout(autosave, 250);
         return;
       }
@@ -707,10 +727,15 @@ export default function AIStudio({
       );
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
+        if (nativeBoard) e.stopImmediatePropagation();
         flush().catch(() => {});
         return;
       }
       if (editing) return;
+      if (nativeBoard && (
+        ["Escape", "Delete", "Backspace", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key) ||
+        ((e.metaKey || e.ctrlKey) && ["a", "z", "d"].includes(e.key.toLowerCase()))
+      )) e.stopImmediatePropagation();
       if (e.key === "Escape") {
         finishGesture();
         setPanel(null);
@@ -764,8 +789,8 @@ export default function AIStudio({
         );
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, nativeBoard);
+    return () => window.removeEventListener("keydown", onKey, nativeBoard);
   }, [results, notes, sections, selection, busy]);
   async function leave(action) {
     if (busy || uploading) return;
@@ -1028,6 +1053,10 @@ export default function AIStudio({
       gestureFrame.current = requestAnimationFrame(paintGesture);
   }
   function finishGesture({ render = true } = {}) {
+    if (nativeBoard) {
+      world.current?.settle?.();
+      return;
+    }
     if (gestureFrame.current != null)
       cancelAnimationFrame(gestureFrame.current);
     gestureFrame.current = null;
@@ -1752,12 +1781,13 @@ export default function AIStudio({
       </aside>
       <main
         className={`st-canvas ${tool === "hand" ? "st-pan" : ""}`}
+        data-board-engine={boardEngine}
         ref={viewport}
-        onPointerDown={(e) => startPointer(e)}
-        onPointerMove={movePointer}
-        onPointerUp={endPointer}
-        onPointerCancel={endPointer}
-        onLostPointerCapture={() => finishGesture()}
+        onPointerDown={nativeBoard ? undefined : (e) => startPointer(e)}
+        onPointerMove={nativeBoard ? undefined : movePointer}
+        onPointerUp={nativeBoard ? undefined : endPointer}
+        onPointerCancel={nativeBoard ? undefined : endPointer}
+        onLostPointerCapture={nativeBoard ? undefined : () => finishGesture()}
       >
         <div className="st-canvas-top">
           <div className="st-canvas-top-left">
@@ -1891,7 +1921,7 @@ export default function AIStudio({
             )}
           </div>
         )}
-        <BoardWorld
+        <Canvas
           ref={world}
           results={results}
           notes={notes}
@@ -1902,6 +1932,8 @@ export default function AIStudio({
           selected={selected}
           editingNote={editingNote}
           handlers={handlers}
+          tool={tool}
+          disabled={busy || uploading || conflicted}
         />
         {selected && !panel && (selectedItem || selectedResult) && (
           <aside

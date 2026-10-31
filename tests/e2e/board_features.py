@@ -108,7 +108,11 @@ def main():
             return next(item for kind in ('results', 'notes', 'sections') for item in snapshot.get(kind, []) if item['id'] == identifier)
 
         def drag(identifier, grip, dx, dy):
-            zoom = page.locator('.st-world').evaluate('(el) => new DOMMatrix(getComputedStyle(el).transform).a')
+            zoom = page.evaluate('''() => {
+                const native = document.querySelector('.dx-board-diagnostics');
+                return native ? Number(native.dataset.cameraZoom)
+                    : new DOMMatrix(getComputedStyle(document.querySelector('.st-world')).transform).a;
+            }''')
             handle = page.locator('[data-board-id="' + identifier + '"] ' + grip)
             bounds = handle.bounding_box()
             assert bounds, 'Drag handle missing'

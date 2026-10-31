@@ -68,7 +68,7 @@ function IconButton({ label, children, ...props }) {
   );
 }
 
-const BoardItem = memo(function BoardItem({
+export const BoardItem = memo(function BoardItem({
   entry,
   selected,
   active,
@@ -76,12 +76,13 @@ const BoardItem = memo(function BoardItem({
   dx,
   dy,
   handlers,
+  positioned = true,
 }) {
   const item = entry.item,
     index = entry.index;
   const position = {
-    left: item.position.x,
-    top: item.position.y,
+    left: positioned ? item.position.x : 0,
+    top: positioned ? item.position.y : 0,
     transform: dx || dy ? `translate(${dx}px,${dy}px)` : undefined,
   };
   const pointer = (event) => handlers.current.startPointer(event, item);
@@ -231,7 +232,7 @@ function takeMountBatch(queue) {
 // A fit operation may reveal thousands of real document nodes at once. Retain
 // existing/active content and mount only that large new set in small frames.
 // Ordinary pans (at most 24 new artboards) continue to render immediately.
-function useProgressiveEntries(entries, index, priorityIds, center) {
+export function useProgressiveEntries(entries, index, priorityIds, center) {
   const mounted = useRef(new Set());
   const [progress, setProgress] = useState(null);
   const targetKey = entries.map((entry) => entry.id).join("|");

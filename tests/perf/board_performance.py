@@ -161,8 +161,14 @@ def main():
         def dom(): return page.evaluate("""() => ({elements:document.querySelectorAll('*').length,
             mountedArtboards:document.querySelectorAll('.st-result').length,
             mountedNotes:document.querySelectorAll('.st-note').length,mountedSections:document.querySelectorAll('.st-section').length,
-            images:document.images.length,worldTransform:document.querySelector('.st-world')?.style.transform,
+            images:document.images.length,boardEngine:document.querySelector('.st-canvas')?.dataset.boardEngine||'legacy',
+            worldTransform:document.querySelector('.dx-board-diagnostics') ? JSON.stringify({...document.querySelector('.dx-board-diagnostics').dataset}) : document.querySelector('.st-world')?.style.transform,
             canvasScrollTop:document.querySelector('.st-canvas')?.scrollTop,canvasScrollLeft:document.querySelector('.st-canvas')?.scrollLeft})""")
+        def view_signature(): return page.evaluate('''() => {
+            const native = document.querySelector('.dx-board-diagnostics');
+            return native ? JSON.stringify({x:native.dataset.cameraX,y:native.dataset.cameraY,zoom:native.dataset.cameraZoom})
+                : document.querySelector('.st-world')?.style.transform;
+        }''')
         def begin(name):
             page.evaluate('(name)=>{window.__boardPerf.phase=name;window.__boardPerf.last=0}',name)
             return time.monotonic(), metrics(), len(requests)
@@ -233,7 +239,7 @@ def main():
                 await Promise.race([(async()=>{await document.fonts.ready;state.fonts=true;
                     await Promise.all([...document.images].map((image,index)=>{
                         const record={index,src:image.currentSrc||image.src,loading:image.loading,complete:image.complete,bounds:image.getBoundingClientRect().toJSON()};
-                        if(!image.closest('.st-world')&&!visible(image)){state.excludedImages.push(record);return Promise.resolve()}
+                        if(!image.closest('.st-world,.dx-shape-content')&&!visible(image)){state.excludedImages.push(record);return Promise.resolve()}
                         state.targets++;
                         state.pendingImages.push(record);
                         return image.decode().catch(error=>{state.decodeErrors.push({src:record.src,message:String(error)})}).finally(()=>{state.pendingImages=state.pendingImages.filter(x=>x!==record)});
@@ -260,13 +266,13 @@ def main():
             hit = page.evaluate('([x,y])=>{const t=document.elementFromPoint(x,y);return {valid:!!t?.closest(".st-canvas")&&!t?.closest("button,input,textarea,select"),target:t?.outerHTML.slice(0,1000)}}',[origin_x,origin_y])
             report['panStart'] = {'bounds':bounds,'x':origin_x,'y':origin_y,**hit}
             assert hit['valid'], 'Pan must start on canvas, not a control: '+str(hit)
-            transform_before=page.locator('.st-world').get_attribute('style')
+            transform_before=view_signature()
             pan_samples=[]
             page.mouse.move(origin_x,origin_y);page.mouse.down()
             for i in range(120):
                 angle=(i+1)*2*math.pi/120
                 page.mouse.move(origin_x+180*math.sin(angle),origin_y+100*(1-math.cos(angle)))
-                if i in (29,59,89):pan_samples.append(page.locator('.st-world').get_attribute('style'))
+                if i in (29,59,89):pan_samples.append(view_signature())
                 page.wait_for_timeout(max(0,((i+1)/60-(time.monotonic()-started[0]))*1000))
             page.mouse.up()
             assert all(sample!=transform_before for sample in pan_samples), 'Native pan did not move Board view'
@@ -284,14 +290,14 @@ def main():
             if args.check_budgets:
                 completion_start = time.monotonic()
                 page.wait_for_function('''() => {
-                    const w = document.querySelector('.st-world');
+                    const w = document.querySelector('.dx-board-diagnostics,.st-world');
                     const target = Number(w?.dataset.renderTargetCount), rendered = Number(w?.dataset.renderedItems);
-                    const mounted = w?.querySelectorAll('.st-result,.st-note,.st-section').length;
+                    const mounted = document.querySelectorAll('.st-result,.st-note,.st-section').length;
                     return w?.dataset.renderPending === '0' && Number.isFinite(target) && target > 0 && rendered === target && mounted === target;
                 }''', timeout=15000)
-                report['fitCompletion'] = page.evaluate('''() => {const w=document.querySelector('.st-world');return {
+                report['fitCompletion'] = page.evaluate('''() => {const w=document.querySelector('.dx-board-diagnostics,.st-world');return {
                     pending:Number(w.dataset.renderPending),target:Number(w.dataset.renderTargetCount),rendered:Number(w.dataset.renderedItems),
-                    mounted:w.querySelectorAll('.st-result,.st-note,.st-section').length}}''')
+                    mounted:document.querySelectorAll('.st-result,.st-note,.st-section').length}}''')
                 report['fitCompletion']['extraWaitAfter1500Ms'] = round((time.monotonic()-completion_start)*1000,3)
             finish(stage,started,1)
             page.screenshot(path=str(output/'board.png'))

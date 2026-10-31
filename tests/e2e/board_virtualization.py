@@ -99,7 +99,7 @@ def main():
             if page.get_by_role('button', name='关闭侧边面板', exact=True).count():
                 page.get_by_role('button', name='关闭侧边面板', exact=True).click()
             page.wait_for_function('document.fonts.status === "loaded"')
-            page.locator('.st-result').first.wait_for()
+            page.locator('.st-result:visible').first.wait_for()
 
         def mounted():
             return page.locator('.st-result').count()
@@ -143,11 +143,11 @@ def main():
 
             stage = 'fit-all-and-changing-render-target'
             page.get_by_role('button', name='适应所有方案', exact=True).click()
-            page.wait_for_function('document.querySelector(".st-world").dataset.renderPending === "0"')
-            world = page.locator('.st-world')
+            page.wait_for_function('document.querySelector(".dx-board-diagnostics,.st-world").dataset.renderPending === "0"')
+            world = page.locator('.dx-board-diagnostics,.st-world')
             assert world.get_attribute('data-rendered-items') == world.get_attribute('data-render-target-count')
             canvas = page.locator('.st-canvas').bounding_box()
-            view = world.evaluate('el=>{const m=new DOMMatrix(getComputedStyle(el).transform);return {x:m.e,y:m.f,zoom:m.a}}')
+            view = world.evaluate('el=>{if(el.dataset.cameraZoom)return {x:Number(el.dataset.cameraX),y:Number(el.dataset.cameraY),zoom:Number(el.dataset.cameraZoom)};const m=new DOMMatrix(getComputedStyle(el).transform);return {x:m.e,y:m.f,zoom:m.a}}')
             actual = set(page.locator('.st-result').evaluate_all('(els)=>els.map(e=>e.dataset.boardId)'))
             visible = {r['id'] for r in original['results']
                 if view['x'] + r['position']['x'] * view['zoom'] < canvas['width']
@@ -162,7 +162,7 @@ def main():
             page.get_by_role('button', name='适应所有方案', exact=True).click()
             for _ in range(8):
                 page.get_by_role('button', name='放大画布', exact=True).click()
-            page.wait_for_function('document.querySelector(".st-world").dataset.renderPending === "0"')
+            page.wait_for_function('document.querySelector(".dx-board-diagnostics,.st-world").dataset.renderPending === "0"')
             assert world.get_attribute('data-rendered-items') == world.get_attribute('data-render-target-count')
             assert 0 < mounted() < 50
             check('overview-finishes-real-rendering-and-new-viewport-cancels-stale-mounts', {'overviewVisibleArtboards': len(visible)})
@@ -171,7 +171,7 @@ def main():
 
             stage = 'full-data-selection-and-history'
             page.get_by_role('button', name='选择与移动方案', exact=True).click()
-            page.locator('.st-design-select').first.click()
+            page.locator('.st-design-select:visible').first.click()
             page.keyboard.press(MOD + '+a')
             expect(page.locator('.st-item-inspector')).to_contain_text('已选 320 项')
             assert mounted() < 50, 'Selecting all must not mount all selected objects'
@@ -235,7 +235,7 @@ def main():
             page.mouse.move(x + 60, y + 30, steps=8)
             # A real browser pointer gesture followed by the platform's cancel
             # event; no HTTP fault or fabricated response is involved.
-            page.locator('.st-canvas').dispatch_event('pointercancel', {'pointerId': 1, 'bubbles': True})
+            page.locator('.dx-tldraw-board' if page.locator('.dx-tldraw-board').count() else '.st-canvas').dispatch_event('pointercancel', {'pointerId': 1, 'bubbles': True})
             page.mouse.up()
             cancelled = wait_state(lambda s: s['notes'][0]['position']['x'] == note['position']['x'] + 80)
             assert cancelled['notes'][0]['position']['y'] == note['position']['y'] + 40

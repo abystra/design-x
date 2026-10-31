@@ -1,0 +1,44 @@
+.dx-tldraw-board {
+  position: absolute;
+  inset: 0;
+  isolation: isolate;
+  --tl-color-background: transparent;
+  --tl-color-selection: #8e9f78;
+  --tl-font-sans: inherit;
+}
+.dx-tldraw-board .tl-background {
+  background: transparent;
+}
+.dx-tldraw-board .tl-container {
+  font-family: inherit;
+  background: transparent;
+  --tl-color-background: transparent;
+  --tl-color-selection-stroke: #8e9f78;
+  --tl-color-selection-fill: #8e9f7826;
+}
+.dx-tldraw-board .tl-html-container {
+  overflow: visible;
+}
+.dx-shape-content > .st-result,
+.dx-shape-content > .st-note,
+.dx-shape-content > .st-section {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+.dx-shape-content > .st-result {
+  will-change: transform;
+}
+.dx-board-diagnostics {
+  display: none;
+}
+.dx-tldraw-board .tl-watermark_SEE-LICENSE {
+  z-index: 4;
+}
+.st-canvas[data-board-engine="tldraw"] > .st-empty-canvas {
+  z-index: 1;
+  pointer-events: none;
+}
+.st-canvas[data-board-engine="tldraw"] > .st-empty-canvas button {
+  pointer-events: auto;
+}
