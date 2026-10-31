@@ -10,3 +10,6 @@ test-results/
 playwright-report/
 .turbo/
 *.tsbuildinfo
+
+tests/e2e/.artifacts/
+tests/e2e/__pycache__/

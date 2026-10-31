@@ -3,7 +3,7 @@ import { tenantTransaction } from '../../../packages/server-infra/src/db.js';
 import { config } from '../../../packages/server-infra/src/config.js';
 import { putObject,getObject,deleteObject,ensureBucket } from '../../../packages/server-infra/src/storage.js';
 import { createJob } from '../../../packages/server-domain/src/jobs.js';
-import { id,assetDto,HttpError,notFound,emit } from '../../../packages/server-domain/src/common.js';
+import { id,assetDto,HttpError,notFound,emit,jobDto } from '../../../packages/server-domain/src/common.js';
 export async function mediaRoutes(app:FastifyInstance) {
  app.get('/api/assets',async(req:any)=>tenantTransaction(req.identity.workspace.id,async tx=>(await tx.query('SELECT * FROM assets WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT 1000')).rows.map(assetDto)));
  app.post('/api/assets',async(req:any,reply)=>{
@@ -29,7 +29,12 @@ export async function mediaRoutes(app:FastifyInstance) {
  app.delete('/api/assets/:id',async(req:any)=>tenantTransaction(req.identity.workspace.id,async tx=>{
   const row=(await tx.query('SELECT * FROM assets WHERE id=$1 AND deleted_at IS NULL FOR UPDATE',[req.params.id])).rows[0];if(!row)notFound();
   if((await tx.query('SELECT 1 FROM asset_refs WHERE asset_id=$1 LIMIT 1',[row.id])).rowCount)throw new HttpError(409,'ASSET_IN_USE','素材仍被设计引用，请先在设计中移除');
+  if((await tx.query("SELECT 1 FROM document_versions v, jsonb_array_elements(v.content->'nodes') node WHERE node->>'src' IN ($1,$2) LIMIT 1",[`/api/assets/${row.id}/file`,`/api/assets/${row.id}/thumbnail`])).rowCount)throw new HttpError(409,'ASSET_IN_USE','素材仍被历史版本引用，请保留以便恢复');
+  if((await tx.query("SELECT 1 FROM preferences WHERE value::text LIKE $1 LIMIT 1",[`%/api/assets/${row.id}/%`])).rowCount)throw new HttpError(409,'ASSET_IN_USE','素材仍用于品牌套件或创作参考');
+  if((await tx.query("SELECT 1 FROM documents WHERE kind='board' AND content::text LIKE $1 LIMIT 1",[`%/api/assets/${row.id}/%`])).rowCount)throw new HttpError(409,'ASSET_IN_USE','素材仍被工作区引用');
   // Keep bytes available for historical versions; retention/GC can reclaim unreferenced deleted objects later.
+  const cancelled=(await tx.query("UPDATE jobs SET status='cancelled',updated_at=now() WHERE kind='media.ingest' AND payload->>'assetId'=$1 AND status IN ('queued','running') RETURNING *",[row.id])).rows;
+  for(const job of cancelled)await emit(tx,req.identity.workspace.id,'job.updated',jobDto(job));
   await tx.query('UPDATE assets SET deleted_at=now() WHERE id=$1',[row.id]);await emit(tx,req.identity.workspace.id,'asset.deleted',{assetId:row.id});return {ok:true};
  }));
 }

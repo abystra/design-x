@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, ArrowUpRight, Bookmark, ChevronRight, Search, SlidersHorizontal, Sparkles, WandSparkles, X } from 'lucide-react';
 import catalog from '../data/catalog.json';
+import { api } from '../lib/api';
 import './catalog.css';
 
 const categoryOrder = ['电商', '海报', '自媒体', '品牌', '视频', '服饰', '办公', '图像'];
@@ -23,13 +24,6 @@ function visualFor(item) {
   if (/商品|套图|详情|带货/.test(item.name)) return visuals.电商;
   if (/海报|文案|笔记/.test(item.name)) return visuals.海报;
   return visuals.图像;
-}
-
-function readFavorites() {
-  try {
-    const stored = JSON.parse(localStorage.getItem('designx-catalog-favorites') || '[]');
-    return Array.isArray(stored) ? stored.filter(id => typeof id === 'string') : [];
-  } catch { return []; }
 }
 
 function Artwork({ item, index = 0 }) {
@@ -64,7 +58,23 @@ export default function Catalog({ mode = 'skills', onSelect, onToast }) {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('全部');
   const [favoritesOnly, setFavoritesOnly] = useState(false);
-  const [favorites, setFavorites] = useState(readFavorites);
+  const [favorites, setFavorites] = useState([]);
+  const [favoritesReady, setFavoritesReady] = useState(false);
+  const [favoriteError, setFavoriteError] = useState('');
+  const [savingFavorite, setSavingFavorite] = useState(false);
+  const toast = useRef(onToast);
+  toast.current = onToast;
+  const loadFavorites = useCallback(async () => {
+    try {
+      const value = await api('/preferences/catalog-favorites');
+      setFavorites(Array.isArray(value) ? value : []); setFavoritesReady(true); setFavoriteError('');
+    } catch (error) { setFavoriteError(error.message); toast.current?.(error.message); }
+  }, []);
+  useEffect(() => {
+    loadFavorites();
+    window.addEventListener('designx:refresh', loadFavorites);
+    return () => window.removeEventListener('designx:refresh', loadFavorites);
+  }, [loadFavorites]);
   useEffect(() => { setQuery(''); setCategory('全部'); setFavoritesOnly(false); }, [mode]);
 
   const categories = useMemo(() => {
@@ -83,21 +93,25 @@ export default function Catalog({ mode = 'skills', onSelect, onToast }) {
     { find: isTools ? /^AI试衣$/ : /^模特试穿$/, title: '风格上身，灵感成真。', subtitle: '探索服饰与人物的更多可能', tag: '时尚穿搭', image: 'fashion', className: 'fashion' },
   ].map(item => ({ ...item, entry: entries.find(entry => item.find.test(entry.name)) })).filter(item => item.entry);
 
-  function toggleFavorite(item) {
+  async function toggleFavorite(item) {
+    if (!favoritesReady || savingFavorite) return;
+    setSavingFavorite(true);
     const wasSaved = favorites.includes(item.id);
     const next = wasSaved ? favorites.filter(id => id !== item.id) : [...favorites, item.id];
     try {
-      localStorage.setItem('designx-catalog-favorites', JSON.stringify(next));
+      await api('/preferences/catalog-favorites', { method: 'PUT', body: next });
       setFavorites(next);
       onToast?.(wasSaved ? '已从收藏移除' : '已加入我的收藏');
-    } catch { onToast?.('收藏暂时无法保存，请检查浏览器存储空间'); }
+    } catch (error) { onToast?.(error.message); }
+    finally { setSavingFavorite(false); }
   }
 
   function resetFilters() { setQuery(''); setCategory('全部'); setFavoritesOnly(false); }
 
   return <section className="dx-catalog" aria-label={isTools ? 'AI工具目录' : '创作技能目录'}>
+    {favoriteError && <div className="dx-cat-load-error" role="alert"><span>{favoriteError}</span><button onClick={loadFavorites}>重新加载收藏</button></div>}
     <header className="dx-cat-heading">
-      <div className="dx-cat-eyebrow"><span>{isTools ? 'YOUR CREATIVE TOOLKIT' : 'YOUR CREATIVE POSSIBILITIES'}</span><i /><span className="dx-cat-demo">原型演示</span></div>
+      <div className="dx-cat-eyebrow"><span>{isTools ? 'YOUR CREATIVE TOOLKIT' : 'YOUR CREATIVE POSSIBILITIES'}</span><i /><span className="dx-cat-demo">AI 能力稍后开放</span></div>
       <div className="dx-cat-title-row"><div><h1>{isTools ? '每一步设计，都有顺手的工具。' : '让专业能力，成为你的创作直觉。'}</h1><p>{isTools ? '把复杂的操作变简单，让每一个细节都恰到好处。' : '从一个想法，到一份出色作品。为你找到最合适的创作方式。'}</p></div><div className="dx-cat-total"><strong>{entries.length}</strong><span>种{isTools ? '创作工具' : '专业技能'}<Sparkles size={13} /></span></div></div>
     </header>
 
@@ -119,7 +133,7 @@ export default function Catalog({ mode = 'skills', onSelect, onToast }) {
       const index = entries.findIndex(entry => entry.id === item.id);
       return <article key={item.id} className="dx-cat-card">
         <button type="button" className="dx-cat-card-main" onClick={() => onSelect?.(item)} aria-label={`使用${item.name}`}><Artwork item={item} index={index} /><div className="dx-cat-card-info"><div className="dx-cat-card-title"><h3>{item.name}</h3><ArrowUpRight size={16} /></div><p>{item.description}</p><div className="dx-cat-card-footer"><span>{item.category}</span><span><WandSparkles size={12} />{isTools ? '立即使用' : '灵感即刻开始'}<ChevronRight size={12} /></span></div></div></button>
-        <button type="button" className={`dx-cat-save ${saved ? 'saved' : ''}`} onClick={() => toggleFavorite(item)} aria-label={`${saved ? '取消收藏' : '收藏'}${item.name}`} aria-pressed={saved}>{saved ? <Bookmark size={15} fill="currentColor" /> : <Bookmark size={15} />}</button>
+        <button type="button" className={`dx-cat-save ${saved ? 'saved' : ''}`} disabled={!favoritesReady || savingFavorite} onClick={() => toggleFavorite(item)} aria-label={`${saved ? '取消收藏' : '收藏'}${item.name}`} aria-pressed={saved}>{saved ? <Bookmark size={15} fill="currentColor" /> : <Bookmark size={15} />}</button>
       </article>;
     })}</div> : <div className="dx-cat-empty" role="status"><div>{favoritesOnly ? <Bookmark size={28} strokeWidth={1.4} /> : <Search size={28} strokeWidth={1.4} />}</div><h3>{favoritesOnly && !query && category === '全部' ? '把喜欢的灵感，留在这里。' : '暂时没有找到合适的结果'}</h3><p>{favoritesOnly && !query && category === '全部' ? '点击卡片上的收藏图标，让顺手的技能随时可用。' : '试试“海报”“商品”或“图片”，也可以清除筛选重新探索。'}</p><button type="button" onClick={resetFilters}>探索全部{isTools ? '工具' : '技能'}<ArrowRight size={15} /></button></div>}
 

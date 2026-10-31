@@ -126,7 +126,7 @@ export function assetIds(doc: Artboard): string[] {
     ...new Set(
       doc.nodes.flatMap((n) => {
         const id = n.src?.match(
-          /^\/api\/assets\/([^/]+)\/(?:file|thumbnail)/,
+          /^\/api\/assets\/([^/]+)\/(?:file|thumbnail)(?=[?#]|$)/,
         )?.[1];
         return id ? [id] : [];
       }),

@@ -4,7 +4,7 @@ import { tenantTransaction } from '../../../packages/server-infra/src/db.js';
 import { id,notFound,HttpError,emit } from '../../../packages/server-domain/src/common.js';
 import { templates } from '../../../src/data/templates.js';
 import { readFile } from 'node:fs/promises';
-const preferenceKeys=new Set(['favorites','template-favorites','asset-favorites','catalog-favorites','references','brand','ui','recent']);
+const preferenceKeys=new Set(['favorites','template-favorites','asset-favorites','catalog-favorites','studio-skills','references','brand','ui','recent']);
 export async function libraryRoutes(app:FastifyInstance) {
  app.get('/api/templates',async()=>templates);
  app.get('/api/catalog',async()=>JSON.parse(await readFile(new URL('../../../src/data/catalog.json',import.meta.url),'utf8')));
@@ -26,7 +26,7 @@ export async function libraryRoutes(app:FastifyInstance) {
  }));
  app.put('/api/preferences/:key',async(req:any)=>tenantTransaction(req.identity.workspace.id,async tx=>{
   const key=req.params.key;if(!preferenceKeys.has(key))notFound();let value=req.body;
-  if(/favorites/.test(key))value=z.array(z.string().max(200)).max(5000).parse(value);
+  if(/favorites/.test(key)||key==='studio-skills')value=z.array(z.string().max(200)).max(5000).parse(value);
   if(key==='references')value=z.array(z.object({id:z.string().max(100),title:z.string().max(200),prompt:z.string().max(10000).optional(),image:z.string().max(2048).optional()}).passthrough()).max(500).parse(value);
   if(key==='brand')value=z.object({name:z.string().max(100),colors:z.array(z.string().regex(/^#[0-9a-f]{6}$/i)).min(1).max(20),description:z.string().max(3000).optional(),font:z.string().max(200).optional(),logo:z.string().max(2048).optional(),subtitle:z.string().max(300).optional()}).passthrough().parse(value);
   if(value===undefined||Buffer.byteLength(JSON.stringify(value))>1000000)throw new HttpError(400,'INVALID_PREFERENCE','设置数据超出限制');

@@ -1,9 +1,10 @@
+import { recordOps } from '../../../packages/server-domain/src/document-ops.js';
 import { idempotent } from '../../../packages/server-domain/src/idempotency.js';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { tenantTransaction } from '../../../packages/server-infra/src/db.js';
 import { createProject,patchProject,getProject,projectDto,studioSnapshot,saveStudio,artboardDto } from '../../../packages/server-domain/src/projects.js';
-import { id,notFound,emit,validateDesign,saveVersion,syncAssetRefs,HttpError,blankDesign } from '../../../packages/server-domain/src/common.js';
+import { id,notFound,emit,validateDesign,saveVersion,syncAssetRefs,HttpError,blankDesign,jobDto } from '../../../packages/server-domain/src/common.js';
 const params=(req:any)=>req.params as Record<string,string>;
 export async function projectRoutes(app:FastifyInstance) {
  app.get('/api/projects',async(req:any)=>tenantTransaction(req.identity.workspace.id,async tx=>{
@@ -16,6 +17,8 @@ export async function projectRoutes(app:FastifyInstance) {
  app.patch('/api/projects/:id',async(req:any)=>tenantTransaction(req.identity.workspace.id,tx=>patchProject(tx,req.identity.workspace.id,params(req).id,req.body||{})));
  app.delete('/api/projects/:id',async(req:any)=>tenantTransaction(req.identity.workspace.id,async tx=>{
   await getProject(tx,params(req).id);await tx.query('UPDATE projects SET deleted_at=now() WHERE id=$1',[params(req).id]);
+  const cancelled=(await tx.query("UPDATE jobs SET status='cancelled',updated_at=now() WHERE project_id=$1 AND status IN ('queued','running') RETURNING *",[params(req).id])).rows;
+  for(const job of cancelled)await emit(tx,req.identity.workspace.id,'job.updated',jobDto(job));
   await emit(tx,req.identity.workspace.id,'project.deleted',{projectId:params(req).id});return {ok:true};
  }));
  app.post('/api/projects/:id/restore',async(req:any)=>tenantTransaction(req.identity.workspace.id,async tx=>{
@@ -42,6 +45,7 @@ export async function projectRoutes(app:FastifyInstance) {
   if(body.baseRevision!==current.revision)throw new HttpError(409,'DOC_REVISION_CONFLICT','画板已更新，请重新载入');
   const design=validateDesign(body.design||current.content);await syncAssetRefs(tx,req.identity.workspace.id,current.id,design);
   const doc=(await tx.query('UPDATE documents SET content=$1,title=$2,revision=revision+1,updated_at=now() WHERE id=$3 RETURNING *',[JSON.stringify(design),String(body.title||current.title).slice(0,200),current.id])).rows[0];
+  await recordOps(tx,req.identity.workspace.id,doc,current.content);
   await saveVersion(tx,req.identity.workspace.id,doc);
   await tx.query('UPDATE projects SET updated_at=now(),image=CASE WHEN primary_artboard_id=$1 THEN $2 ELSE image END WHERE id=$3',[current.id,design.nodes.find((n:any)=>n.type==='image')?.src||null,p.id]);
   await emit(tx,req.identity.workspace.id,'document.committed',{projectId:p.id,documentId:doc.id,revision:doc.revision});return artboardDto(doc,body.position);
@@ -57,8 +61,11 @@ export async function projectRoutes(app:FastifyInstance) {
  app.post('/api/projects/:id/versions/:versionId/restore',async(req:any)=>tenantTransaction(req.identity.workspace.id,async tx=>{
   const p=params(req),project=await getProject(tx,p.id);
   const version=(await tx.query('SELECT * FROM document_versions WHERE id=$1 AND project_id=$2',[p.versionId,p.id])).rows[0];if(!version)notFound();
+  const current=(await tx.query('SELECT * FROM documents WHERE id=$1 FOR UPDATE',[version.document_id])).rows[0];
   const doc=(await tx.query('UPDATE documents SET content=$1,revision=revision+1,updated_at=now() WHERE id=$2 RETURNING *',[JSON.stringify(version.content),version.document_id])).rows[0];
+  await recordOps(tx,req.identity.workspace.id,doc,current.content);
   await syncAssetRefs(tx,req.identity.workspace.id,doc.id,doc.content);await saveVersion(tx,req.identity.workspace.id,doc,`恢复：${version.name||version.revision}`);
+  await tx.query('UPDATE projects SET updated_at=now(),image=CASE WHEN primary_artboard_id=$1 THEN $2 ELSE image END WHERE id=$3',[doc.id,doc.content.nodes?.find((n:any)=>n.type==='image')?.src||null,p.id]);
   await emit(tx,req.identity.workspace.id,'document.committed',{projectId:p.id,documentId:doc.id,revision:doc.revision});
   return projectDto(await getProject(tx,project.id));
  }));

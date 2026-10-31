@@ -1,62 +1,62 @@
 # Design X · 灵感设计室
 
-以美图设计室的产品资料与已观察页面为参考的高保真交互原型。核心路径为「打开 AI 工作区 → 对话 / 技能 / 素材 → 多方案画布 → 连续修改 → 精细编辑与导出」。创建体验依据用户提供的美图新建工作区截图调整。
+保留现有高仿真 UI 的非 AI 创作系统：账户与个人空间、模板、Board、精细编辑器、项目/版本、素材与品牌、真实后台处理和导出。业务数据在 PostgreSQL，文件在 S3 兼容对象存储，任务由独立 Worker / Renderer 执行。
 
-## 本地运行
+AI 执行尚未接入。已确定的后续架构为 **E2B Sandbox → Harness → Codex SDK**，见 [ADR-0001](docs/adr/0001-codex-e2b.md)。产品入口如实显示未接入，不使用规则生成冒充模型能力。
 
-需要 Node.js 20.19+ 或 22.12+。
+## 本地启动
 
-```bash
-npm install
-npm run dev -- --port 5173
-```
-
-打开 http://127.0.0.1:5173/ 。终端服务需要保持运行。若页面显示连接被拒绝，请重新运行上面的 dev 命令并刷新。
+已验证环境：Node.js 22.22.3、pnpm 10.20.0、Docker。数据库与存储只绑定本机地址，使用专门的开发卷，不覆盖其他项目。
 
 ```bash
-npm run build                 # 生产构建，输出 dist/
-npm run check                # 页面渲染、创作规则、会话恢复检查
-npm run preview              # 预览生产构建
+corepack enable
+pnpm install --frozen-lockfile
+cp .env.example .env
+pnpm infra:up
+pnpm db:migrate
+pnpm exec playwright install chromium
+pnpm dev:all
 ```
 
-## 建议体验路径
+打开 [Design X](http://127.0.0.1:5173/)，创建自己的账户，无预置通用密码。端口：Web 5173、API 3001、PostgreSQL 55432、S3 58333。迁移需要数据库建表/角色权限；请先等 PostgreSQL healthy。已有开发环境可以直接沿用 `.env`，不用覆盖。
 
-1. 点击「开始创作」→ AI 对话 + 自由画布；在技能面板选「营销海报」→ 点击示例需求 → 发送 → 生成 3 个可编辑方案。
-2. 选中方案 →「继续修改」→ 输入「改成蓝色，调整为 1:1」→ 比较新旧版本 → 精细编辑 → 保存并返回原会话。
-3. 在输入框使用 `/` 选择技能、`@` 引用素材；试用文件、创作记录、资产库面板和三种创作模式。
-4. 模板灵感 → 搜索「咖啡」→ 预览 → 使用模板 → 修改文字与颜色 → 撤销 / 重做 → 导出 PNG。
-5. 我的项目 → 新建文件夹 → 作品更多菜单 → 移到文件夹 / 重命名 → 再次进入编辑器。
-6. 资产库 → 上传本地素材 / 收藏 / 创建参考 / 编辑品牌套件。
-7. 设计工具工作台「演示状态」选择模拟失败 → 生成 → 重试；或在运行中取消。
+各进程也可单独运行：`pnpm dev:web`、`pnpm dev:api`、`pnpm dev:worker`、`pnpm dev:renderer`。仅运行原有 `pnpm dev` 会启动前端，其他进程仍须运行。
 
-## 内容与边界
+停止应用使用 Ctrl+C；`pnpm infra:down` 停止基础设施并保留数据卷。不要用 `down -v`，除非有意删除本项目开发数据。
 
-- 七个主导航页面、创作指南、65 个技能与 35 个工具目录，以及独立全屏 AI 工作区。
-- AI 工作区支持会话、技能快捷选择、文件与资产引用、运行取消与重试、多方案移动 / 缩放、版本续改、精修回流、刷新恢复。
-- 八张精选设计模板、六张本地摄影素材。
-- 任务根据用途复用商品、图文、图像处理、视频分镜、多页内容及文本结构表单；目录覆盖不代表逐项完整实现全部专业参数。
-- AI 执行是明确标注的本地演示，生成的是素材排版、分镜或内容结构预览；没有真实模型、视频、PPT、分析检索或像素处理服务。
-- 画布有真实文字 / 图片 / 形状图层、拖动缩放、属性编辑、撤销重做，以及 PNG / JPG / SVG 导出代码。
-- 项目、收藏、文件夹、素材及品牌套件保存在当前浏览器 localStorage。无账户、云同步、多人共享或支付。
-- 主导航使用 URL hash；`#studio` 恢复最近一次本地 AI 会话（需求、素材、方案、位置与缩放）。刷新中断运行并保留重试上下文。当前仅保留一个 AI 会话，新建会替换草稿；需要长期保留的方案请保存到我的项目。工具工作台和编辑器的未保存修改仍为内存状态。
-- 浏览器容量不足时会明确提示草稿存储失败；重复图片数据在 AI 会话中去重存储。
+## 可用旅程
 
-## 文件组织
+1. 模板灵感 → 预览模板 → 使用模板 → 修改文字/图片/图层 → 自动或手动保存 → 刷新重开。
+2. 开始创作 → Board → 添加空白画板、模板或素材 → 平移缩放、多选、对齐、复制/移除、撤销重做 → 精细编辑 → 返回原画布。
+3. 资产库 → 上传真实图片 → 后台校验/缩略图 → 素材引用；管理收藏、创作参考、品牌色、字体和 Logo。
+4. 项目 → 文件夹、重命名、移动、最近打开、回收站和恢复。注销后重登仍保留。
+5. 编辑器 → 命名版本 / 恢复 → 导出 PNG、JPEG、WebP、单页 PDF、原生 `.dxproj`；右上角创作动态查看后台状态、重试和下载。SVG 另有 API 导出，采用含 DOM 的 `foreignObject`，不作为通用矢量编辑器交换格式承诺。
 
-- `src/App.jsx`：应用框架、首页、模板、全局搜索与工作区入口。
-- `src/components/AIStudio.jsx`：对话、侧边面板、多方案画布与精修衔接。
-- `src/lib/studioModel.js`：可测的本地需求规则、版式生成及续改继承。
-- `src/lib/studioSession.js`：会话序列化与图片去重。
-- `src/components/Catalog.jsx`：技能和工具目录。
-- `src/components/Workbench.jsx`：配置、状态、方案与编辑衔接。
-- `src/components/Editor.jsx`：画布、图层、导出。
-- `src/components/Workspace.jsx`：项目、最近打开、资产及品牌套件。
-- `src/data/catalog.json`：从资料提取的 100 条目录记录。
-- `src/data/templates.js`：模板与示例项目。
-- `docs/product-research.md`：产品拆解、信息架构和设计取舍。
-- `docs/design-spec.md`：实现规格、状态、边界与开发建议。
-- `docs/verification.md`：实际验证结果与待验收项。
+素材上限每张 10 MiB，PNG/JPEG/WebP/GIF；GIF 摄取首帧。被设计、历史版本或品牌/参考引用的素材不能删除。导出绑定提交时的版本，后续编辑不改变已排队文件。断网时已打开编辑器的未同步改动缓存在 IndexedDB，恢复网络后可重试；冲突提供保留副本或使用最新版本。
 
-## 素材来源
+## 验证
 
-本地摄影素材来源于 Unsplash，仅用于原型场景示意，未复制参考平台的 Logo 或品牌身份。具体图片标识与链接见 `docs/design-spec.md`。
+```bash
+pnpm typecheck
+pnpm check
+pnpm test:unit
+pnpm build
+# 真实 PostgreSQL + S3；测试会启动自己的 worker/renderer。
+# 先停止 pnpm dev:all 中的长期 worker/renderer，避免改变离线队列测试的前提。
+node --import tsx --test --test-concurrency=1 apps/api/tests/*.test.ts
+# 重新启动 pnpm dev:all 后运行浏览器旅程。
+python3 -m pip install -r tests/e2e/requirements.txt
+python3 tests/e2e/non_ai_journey.py
+```
+
+`pnpm check` 包含页面结构检查以及保留的原型规则/会话测试夹具；这些夹具不参与产品执行，也不能代替真实服务验收。完整浏览器步骤、实际结果与限制见 [验收指南](docs/implementation/verification.md)、[执行记录](docs/implementation/verification-results.md)、[阶段进度](docs/implementation/progress.md)。
+
+## 工程边界
+
+- `src/`：现有前端渐进迁移，保留原 CSS、页面和交互；`apps/web` 是工作区入口。
+- `apps/api`、`apps/worker`、`apps/renderer`：HTTP/SSE、媒体工作进程、Chromium 导出进程。
+- `packages/doc-core`、`doc-render`：版本化文档校验、正向/反向操作、统一 DOM/SVG 渲染。
+- `packages/server-domain`、`server-infra`：领域业务、RLS、事务、队列和 S3。
+- `db/migrations`、`infra/compose`：可重放 SQL 迁移、本地 PostgreSQL / SeaweedFS。
+
+当前是可本地运行和联调的非 AI 版本，尚未作公网生产部署验收。邮箱验证/找回、OTP、自动冲突 rebase、原生项目导入、定时素材 GC、多人实时协作和后续 AI 执行未实现。生产环境需独立配置数据库角色、存储凭证、HTTPS 和备份，不能使用示例开发密码。

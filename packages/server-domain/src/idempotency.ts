@@ -1,10 +1,15 @@
 import {createHash} from 'node:crypto';
 import type {Tx} from '../../server-infra/src/db.js';
 import {HttpError} from './common.js';
+export function canonical(value:any):string {
+ if(Array.isArray(value))return '['+value.map(canonical).join(',')+']';
+ if(value&&typeof value==='object')return '{'+Object.keys(value).sort().map(key=>JSON.stringify(key)+':'+canonical(value[key])).join(',')+'}';
+ return JSON.stringify(value);
+}
 export async function idempotent<T>(tx:Tx,workspaceId:string,key:unknown,request:unknown,operation:()=>Promise<T>):Promise<T>{
  if(!key)return operation();
  if(typeof key!=='string'||key.length>200)throw new HttpError(400,'INVALID_IDEMPOTENCY_KEY','幂等键无效');
- const hash=createHash('sha256').update(JSON.stringify(request)).digest('hex');
+ const hash=createHash('sha256').update(canonical(request)).digest('hex');
  await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[`${workspaceId}:${key}`]);
  const existing=(await tx.query('SELECT request_hash,response FROM idempotency_keys WHERE key=$1',[key])).rows[0];
  if(existing){if(existing.request_hash!==hash)throw new HttpError(409,'IDEMPOTENCY_KEY_REUSED','此请求标识已用于其他操作');return existing.response;}

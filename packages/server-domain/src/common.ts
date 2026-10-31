@@ -23,7 +23,7 @@ export async function validateSources(tx: Tx, design: any) {
    else if (!samplePattern.test(node.src)) throw new HttpError(400,'INVALID_ASSET','请先上传图片到素材库');
  }
  for (const assetId of assetIds) {
-   const result=await tx.query("SELECT id FROM assets WHERE id=$1 AND deleted_at IS NULL AND status='ready'",[assetId]);
+   const result=await tx.query("SELECT id FROM assets WHERE id=$1 AND deleted_at IS NULL AND status='ready' FOR SHARE",[assetId]);
    if (!result.rowCount) throw new HttpError(400,'INVALID_ASSET','引用的素材尚未就绪或不属于此空间');
  }
  return [...assetIds];

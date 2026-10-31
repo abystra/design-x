@@ -1,0 +1,1 @@
+{"name":"@dx/web","private":true,"type":"module","scripts":{"dev":"vite --config ../../vite.config.ts ../../","build":"vite build --config ../../vite.config.ts ../../"}}

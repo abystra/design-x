@@ -26,6 +26,9 @@ importers:
       '@fontsource-variable/noto-sans-sc':
         specifier: ^5.3.1
         version: 5.3.1
+      '@fontsource-variable/source-serif-4':
+        specifier: ^5.3.1
+        version: 5.3.1
       drizzle-orm:
         specifier: ^0.45.4
         version: 0.45.4(@opentelemetry/api@1.10.0)(@types/pg@8.23.1)(pg@8.23.1)
@@ -524,6 +527,9 @@ packages:
 
   '@fontsource-variable/noto-sans-sc@5.3.1':
     resolution: {integrity: sha512-UB96JJ17HyD5ehEU7Em0hDdh7fvTMB4B4Hzmq5c4QaNwwSLqTrdM2S+coySeBqCkXwh0DxqXT0b0wMrmzorFpQ==}
+
+  '@fontsource-variable/source-serif-4@5.3.1':
+    resolution: {integrity: sha512-4Rtay22SC4lMvw11r/+9kxANB6P3M0X8s1NudBC2v0J1KU2y3DcMoNcT3lBoZ/CqLirzf+StlO6UlJilyrvaUg==}
 
   '@img/colour@1.1.0':
     resolution: {integrity: sha512-Td76q7j57o/tLVdgS746cYARfSyxk8iEfRxewL9h4OMzYhbW4TAcppl0mT4eyqXddh6L/jwoM75mo7ixa/pCeQ==}
@@ -1971,6 +1977,8 @@ snapshots:
       toad-cache: 3.7.4
 
   '@fontsource-variable/noto-sans-sc@5.3.1': {}
+
+  '@fontsource-variable/source-serif-4@5.3.1': {}
 
   '@img/colour@1.1.0': {}
 

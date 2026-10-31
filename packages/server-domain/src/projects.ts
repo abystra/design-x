@@ -1,3 +1,4 @@
+import { recordOps } from './document-ops.js';
 import { z } from 'zod';
 import type { Tx } from '../../server-infra/src/db.js';
 import { id, blankDesign, validateDesign, syncAssetRefs, saveVersion, emit, HttpError, notFound } from './common.js';
@@ -28,6 +29,7 @@ export async function patchProject(tx:Tx,workspaceId:string,projectId:string,inp
   if(input.baseRevision!==project.revision)throw new HttpError(409,'DOC_REVISION_CONFLICT','设计已在其他页面更新，请重新载入后继续');
   const design=validateDesign(input.design);await syncAssetRefs(tx,workspaceId,project.document_id,design);
   const doc=(await tx.query('UPDATE documents SET content=$1,revision=revision+1,title=$2,updated_at=now() WHERE id=$3 RETURNING *',[JSON.stringify(design),title,project.document_id])).rows[0];
+  await recordOps(tx,workspaceId,doc,project.design);
   await saveVersion(tx,workspaceId,doc);
   await tx.query('UPDATE projects SET image=$1 WHERE id=$2',[design.nodes.find((n:any)=>n.type==='image')?.src||null,projectId]);
   await emit(tx,workspaceId,'document.committed',{projectId,documentId:doc.id,revision:doc.revision});
@@ -58,7 +60,8 @@ export async function saveStudio(tx:Tx,workspaceId:string,projectId:string,input
  }
  // Do not duplicate document bodies in the Board's persistence format.
  const content={...snapshot,id:projectId,results:snapshot.results.map(({design,revision,...rest}:any)=>rest)};
- await tx.query('UPDATE documents SET content=$1,revision=revision+1,updated_at=now() WHERE id=$2',[JSON.stringify(content),board.id]);
+ const updated=(await tx.query('UPDATE documents SET content=$1,revision=revision+1,updated_at=now() WHERE id=$2 RETURNING *',[JSON.stringify(content),board.id])).rows[0];
+ await recordOps(tx,workspaceId,updated,board.content);
  if(snapshot.title?.trim())await tx.query('UPDATE projects SET title=$1,updated_at=now() WHERE id=$2',[snapshot.title.trim(),projectId]);
  await emit(tx,workspaceId,'board.committed',{projectId,revision:board.revision+1});
  return studioSnapshot(tx,projectId);
