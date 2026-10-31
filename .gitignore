@@ -2,3 +2,11 @@ node_modules/
 dist/
 .DS_Store
 .idea/
+.env
+.env.*
+!.env.example
+artifacts/
+test-results/
+playwright-report/
+.turbo/
+*.tsbuildinfo

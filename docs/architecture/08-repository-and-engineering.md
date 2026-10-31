@@ -41,12 +41,14 @@ design-x/
 │   │       ├── main.ts              # 按环境变量 WORKER_QUEUES 选择要消费的队列
 │   │       └── handlers/            # ai-turn、recipe-run、gen-image、gen-poll、media-ingest、media-process、
 │   │                                #   media-cutout、job-reconcile、asset-gc、quota-settle、doc-snapshot
-│   └── renderer/                    # Playwright + Chromium + 字体
-│       ├── src/
-│       │   ├── main.ts              # 消费 render.export、render.thumbnail、render.measure
-│       │   └── browser-pool.ts      # 复用浏览器上下文，限制并发和内存
-│       ├── fonts/                   # 构建期从字体制品库同步的分片字体
-│       └── Dockerfile
+│   ├── renderer/                    # Playwright + Chromium + 字体
+│   │   ├── src/
+│   │   │   ├── main.ts              # 消费 render.export、render.thumbnail、render.measure
+│   │   │   └── browser-pool.ts      # 复用浏览器上下文，限制并发和内存
+│   │   ├── fonts/                   # 构建期从字体制品库同步的分片字体
+│   │   └── Dockerfile
+│   └── harness/                     # 后续 AI 阶段：仅在 E2B 模板内运行；Codex SDK + 受限工具/事件/成果桥接
+│       └── src/                     # main、context、tool-client、event-sink、artifact-manifest；不连接业务数据库
 ├── packages/
 │   ├── doc-core/                    # ★ 纯 TS，无 DOM、无 Node API
 │   │   ├── src/
@@ -64,13 +66,14 @@ design-x/
 │   │   └── src/{BoardEngine.ts, tldraw/, dom/, lod.ts, coords.ts}
 │   ├── ui/                          # 设计系统：tokens.css、Radix 封装、图标
 │   ├── contracts/                   # ★ API 与事件契约（Zod）→ OpenAPI 3.1 + 事件 JSON Schema
-│   │   └── src/{http/, events/, errors.ts, ids.ts}
+│   │   └── src/{http/, events/, runtime/, errors.ts, ids.ts} # runtime 是应用协议，不是 SDK 方法声明
 │   ├── api-client/                  # 由 OpenAPI 生成的类型化客户端（openapi-typescript，MIT [已核验]）
 │   ├── server-domain/               # 领域模块（API 与 Worker 共享）
-│   │   └── src/{identity, workspaces, authz, projects, assets, documents, ai, recipes, jobs,
+│   │   └── src/{identity, workspaces, authz, projects, assets, documents, ai, runtime, recipes, jobs,
 │   │            exports, quotas, moderation, audit, fonts, brand, events}/
 │   ├── server-infra/                # db（Drizzle schema 与连接）、queue（pg-boss）、storage（S3）、kms、otel、config
-│   ├── ai-runtime/                  # AgentLoop、ContextBuilder、ToolRegistry、tools/、prompts/、evaluators/
+│   ├── ai-runtime/                  # 后续：Worker 侧 E2B 调度、租约、ToolBridge、事件/成果摄取、恢复；不自研 LLM loop
+│   ├── harness-client/              # 后续：沙箱内受限业务工具/事件客户端，只依赖 contracts
 │   ├── recipes/                     # 配方定义、技能目录（由原 catalog.json 迁移）、模板（Artboard JSON + slots）
 │   │   └── src/{catalog/, product-hero-set/, marketing-poster/, social-cover/, white-bg/, poster-resize/, templates/}
 │   ├── providers/                   # 适配器：volcengine-ark、dashscope、moderation-*、fake（测试）、openai（Global）
@@ -94,6 +97,7 @@ design-x/
 │   └── load/                        # k6 等工具（许可另行核验）压测 API 与队列
 ├── infra/
 │   ├── compose/                     # docker-compose.dev.yml（Postgres、SeaweedFS、mailpit 等）、docker-compose.prod.yml
+│   ├── e2b/                         # 后续：固定版本 Harness/Codex SDK 模板，显式网络策略，不含凭证
 │   ├── helm/                        # Growth 阶段
 │   ├── terraform/                   # 云资源（RDS、OSS、CDN、KMS、SLB）
 │   └── scripts/                     # 部署、迁移、备份演练
@@ -126,7 +130,9 @@ design-x/
 | `server-infra` | `contracts` | `server-domain` |
 | `server-domain` | `doc-core`、`contracts`、`server-infra`、`providers` | `ai-runtime`（避免循环；AI 通过领域接口调用文档） |
 | `recipes` | `doc-core`、`contracts` | `providers`（必须经任务系统计量） |
-| `ai-runtime` | `server-domain`、`recipes`、`providers`、`doc-core` | `apps/*` |
+| `ai-runtime` | `server-domain`、`recipes`、`providers`、`doc-core`、E2B 控制面 SDK | `apps/*`；不在控制面启动 Codex LLM loop |
+| `harness-client` | `contracts` | `server-*`、数据库/存储主凭证适配器 |
+| `apps/harness` | `contracts`、`harness-client`、Codex SDK | `server-domain`、`server-infra`、控制面 E2B 管理凭证；不直接改业务表 |
 | `apps/renderer` | `doc-render`、`doc-core`、`server-infra` | `server-domain`（Renderer 只读文档快照，通过任务输入获取） |
 
 ## H.4 共享类型与契约生成
@@ -151,21 +157,23 @@ Zod schema（packages/contracts、packages/doc-core）
 | 层 | 方式 |
 |---|---|
 | 配置定义 | `packages/server-infra/config.ts` 用 Zod 校验环境变量，启动时校验失败立即退出 |
-| 环境 | `local`、`ci`、`staging`、`prod`；配置差异仅限 URL、密钥、配额、供应商开关（`PROVIDERS_ENABLED=volc,dashscope,fake`） |
+| 环境 | `local`、`ci`、`staging`、`prod`；差异限 URL、密钥、配额、供应商与能力开关；当前 `AI_RUNTIME_ENABLED=false`，不启动 Harness/E2B |
 | 密钥 | local 用 `.env.local`（git 忽略）；staging/prod 由 KMS 或凭据服务注入；仓库内加密配置可用 SOPS |
 | 功能开关 | `feature_flags` 表加环境变量覆盖（MVP 不引入第三方 flag 服务） |
 | 前端配置 | 构建期注入公共配置；tldraw 许可证密钥为公开值（官方说明可放前端），按环境区分 |
 
 ## H.6 开发流程
 
+以下为目标工程命令，实际可执行命令以根 README 和各阶段实现记录为准。
+
 ```text
 pnpm i
 pnpm dev:infra        # docker compose：Postgres 17、SeaweedFS、mailpit
 pnpm db:migrate && pnpm db:seed
-pnpm dev              # turbo 并行：web（Vite）、api、worker（PROVIDERS=fake）、renderer
+pnpm dev              # turbo 并行：web（Vite）、api、非 AI worker、renderer；AI_RUNTIME_ENABLED=false
 ```
 
-- **默认使用 fake 供应商**：本地开发和 CI 不调用真实模型。fake 供应商复用原型 `studioModel.js` 的确定性规则来生成“生成结果”，可以模拟延迟、失败、部分成功和审核拒绝（与原型的“模拟失败”开关对应）。
+- **当前非 AI 阶段禁用 AI 运行时**：本地启动不要求 E2B/OpenAI 凭证。后续单元/契约测试可显式启用 fake 供应商/沙箱适配器，模拟失败、取消和重放；fake 不能作为产品真实生成或 SDK/E2B 验证通过的证据。
 - 提交前：`pnpm lint typecheck test`（Turbo 只跑受影响的包）。
 - PR 检查：单元与集成测试 → 契约 diff → dependency-cruiser → E2E 冒烟（fake 供应商）→ 视觉回归（受影响时）→ 预览环境（可选）。
 - 夜间任务：完整 E2E、性能基准、AI 评测（真实供应商、小样本、有预算上限）。

@@ -100,6 +100,8 @@ erDiagram
 
 ## G.3 表设计（关键字段、索引、关系、保留与删除）
 
+AI 表和下述运行表是后续 Codex/E2B 阶段的目标契约，当前非 AI 阶段不据此声称运行时已落地。业务 `ai_turns`、`jobs` 的状态与 E2B/SDK 状态分别持久化。
+
 > 所有表都包含 `created_at`、`updated_at`（timestamptz）。凡含 `workspace_id` 的表都启用 RLS 策略：`workspace_id = current_setting('app.workspace_id')::uuid`。主键用 UUIDv7（按时间有序）。
 
 | 表 | 关键字段 | 索引与约束 | 保留与删除 |
@@ -121,6 +123,8 @@ erDiagram
 | `ai_sessions` | id、workspace_id、project_id、title、summary、status | (project_id, updated_at desc) | 随项目删除 |
 | `ai_messages` | id、session_id、role(`user`/`assistant`/`tool`/`system`)、content(jsonb：文本、附件引用、结构化卡片)、turn_id | (session_id, id) | 随会话删除 |
 | `ai_turns` | id、session_id、status、trigger(`user`/`continuation`)、continuation_seq、step_count、budget(jsonb)、cost_cny、waiting_on(uuid[])、error_code | (session_id, created_at)、(status) where status in ('running', 'awaiting_jobs') | 随会话删除 |
+| `runtime_runs`（后续） | id、workspace_id、project_id、turn_id、sandbox_id、codex_thread_id、template_version、sdk_version、status、attempt、lease_epoch、lease_expires_at、last_heartbeat_at、last_event_seq、checkpoint_ref、deadline_at | (turn_id, attempt) 唯一；(status, lease_expires_at)；运行身份绑定当前租约 | 删除时撤销凭证并回收沙箱；检查点单独设保留期，不含长期凭证 |
+| `runtime_events`（后续） | run_id、attempt、seq、type、payload、received_at | PK(run_id, attempt, seq)；归属通过 run 校验并纳入租户隔离 | 去重后写入 outbox；原始日志脱敏，保留期在 AI 阶段冻结 |
 | `ai_tool_calls` | id、turn_id、step、tool、input、output、status、latency_ms、cost_cny、idempotency_key | unique(idempotency_key) | 180 天后裁剪 input/output 正文，只保留元数据 |
 | `model_calls` | id、workspace_id、turn_id、job_id、provider、model_id、model_version、units(jsonb)、cost_cny、latency_ms、request_hash、status | (workspace_id, created_at) | 1 年（成本审计） |
 | `recipe_runs` | id、recipe_id、recipe_version、project_id、turn_id、input、status、result_document_ids | (project_id) | 随项目删除 |
@@ -465,6 +469,8 @@ Idempotency-Key: 0193b2f4-11aa-7e00-8c3d-2b9a5c6d7e8f
 | 503 | `PROVIDER_UNAVAILABLE` | 供应商不可用（同步路径） | 是 |
 
 ## G.7 SSE 事件契约
+
+AI 阶段的 Harness 事件先由内部摄取端点校验运行身份、租约与序号，再映射为下面的产品事件；浏览器不直接连接沙箱。内部工具/事件/成果 manifest 采用 `packages/contracts/runtime` 的应用协议，端点在 AI 实现前冻结，不能当成 SDK 原生接口。重复事件不重复写业务状态，失效租约的写请求与迟到成果被拒绝。
 
 **信封**
 

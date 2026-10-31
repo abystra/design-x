@@ -1,6 +1,6 @@
 # Part 11 · 引用来源与核验状态
 
-核验日期：2026-10-30。许可证会变化，**采购和上线前请重新核验**。
+原稿核验日期：2026-10-30。2026-10-31 新增 Codex/E2B 文档阅读记录见 §11.5；其余版本和许可证未重新核查。许可证会变化，**采购和上线前请重新核验**。
 
 ## 11.1 本次直接读取的官方文件 [已核验]
 
@@ -100,3 +100,19 @@
 - `docs/architecture-review.md`（早前的独立评审意见）。
 - `docs/architecture-review.zh-CN.md`：**不存在**，未参考。
 - 原型源码：`src/App.jsx`、`src/components/*.jsx`、`src/lib/*.js`、`src/data/*`、`scripts/*.mjs`。
+
+## 11.5 2026-10-31 用户决策与官方 SDK 文档补充
+
+用户明确将最终 Agent 路线改为 E2B 内 Harness + Codex SDK，并先实施非 AI 链路。此决策覆盖旧评审拒绝 E2B/Codex、默认轻量 loop 和“全部 LLM 为国内 API”的相关结论，详见 [ADR-0001](../adr/0001-codex-e2b.md)。
+
+以下页面已实际读取；只用于确认公开能力和设计边界，**不是本项目真实运行证据**：
+
+| 主题 | 官方来源 | 已确认与限制 |
+|---|---|---|
+| Codex TypeScript SDK | [Codex SDK](https://learn.chatgpt.com/docs/codex-sdk) | `@openai/codex-sdk`；本地 thread 启动、运行、继续和恢复。跨沙箱状态搬迁、产品审批/事件桥接仍需集成验证 |
+| Codex 的 E2B 运行路径 | [E2B Codex](https://docs.e2b.dev/agents/codex) | 官方 Codex 沙箱示例；CLI 示例不等于本项目 SDK Harness 已实现 |
+| 生命周期 | [E2B Sandbox](https://docs.e2b.dev/sandbox) | 创建、连接、超时、暂停/恢复/销毁需由控制面管理 |
+| 持久化 | [E2B Persistence](https://docs.e2b.dev/sandbox/persistence) | 暂停/恢复与销毁不同，网络重连和 SDK 本地状态须分别处理 |
+| 网络边界 | [出站控制](https://docs.e2b.dev/network/internet-access)、[入站限制](https://docs.e2b.dev/network/restrict-public-access) | 显式配置网络限制与私有访问；不依赖账户默认值 |
+
+未验证：实际账号/模型可用性、目标区域与数据地域、SDK/runtime/template 锁定版本、真实流事件/取消/审批桥接、跨沙箱恢复、成本、服务条款与分发许可。本次未调用模型、创建沙箱或读取/配置任何凭证。

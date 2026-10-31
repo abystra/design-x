@@ -1,5 +1,7 @@
 # Part 2 · 架构图（交付物 B）
 
+以下图包含最终 AI 目标，AI 路径尚未实现或验证；当前先落地非 AI 控制面与创作链路。E2B 内 Harness + Codex SDK 已由用户确认，见 [ADR-0001](../adr/0001-codex-e2b.md)。
+
 本部分的组件名、模块名、队列名和包名，与 Part 4–8 保持一致。权威命名见 Part 8 §H.2（包）、Part 5 §E.2（模块）和 Part 7（表、事件、API）。
 
 ---
@@ -16,7 +18,9 @@ flowchart TB
     core["控制面 API + Worker + Renderer"]
   end
 
-  llm["LLM API<br/>豆包 / 通义千问 / DeepSeek<br/>（国内已备案模型）"]
+  llm["配方 / 评估器 LLM API<br/>能力注册表配置"]
+  sbx["E2B Sandbox<br/>Harness + Codex SDK（后续）"]
+  codex["已配置的 Codex 模型服务<br/>账号 / 区域待验证"]
   img["图像模型 API<br/>Seedream / Qwen-Image 等"]
   vid["视频模型 API（Phase 3）<br/>Seedance / 万相 / 可灵 等"]
   mod["内容安全 API<br/>阿里云 / 火山引擎"]
@@ -28,6 +32,8 @@ flowchart TB
   admin -.-> web
   web <--> core
   core --> llm
+  core -.->|调度 / 受限业务桥接| sbx
+  sbx -.-> codex
   core --> img
   core -.-> vid
   core --> mod
@@ -65,14 +71,15 @@ flowchart LR
   end
 
   subgraph Workers["apps/worker、apps/renderer"]
-    aiw["AI 执行<br/>ai.turn、recipe.run"]
+    aiw["AI 调度 / 确定性配方<br/>ai.turn、recipe.run（后续）"]
     genw["生成与媒体<br/>gen.image、media.ingest、media.process"]
     rend["渲染<br/>render.export、render.thumbnail"]
   end
 
   pg[("PostgreSQL<br/>业务数据、op-log、快照、<br/>队列、outbox")]
   obj[("对象存储 + CDN")]
-  prov["外部模型与审核 API"]
+  prov["配方 / 图像模型与审核 API"]
+  sandbox["E2B：Harness + Codex SDK<br/>受限工作区（后续）"]
 
   ws --- chat
   ws --- board
@@ -88,7 +95,9 @@ flowchart LR
   pg -->|pg-boss 队列| aiw
   pg -->|pg-boss 队列| genw
   pg -->|pg-boss 队列| rend
-  aiw -->|"typed tools（进程内调用领域服务）"| pg
+  aiw -->|运行关联 / 租约| pg
+  aiw -.->|生命周期调度| sandbox
+  sandbox -.->|受限业务工具 / 进度 / 成果| gw
   aiw --> prov
   genw --> prov
   genw --> obj
@@ -98,8 +107,8 @@ flowchart LR
 
 **说明**
 
-- **真相源**：业务数据和文档都在 PostgreSQL，二进制都在对象存储。浏览器 IndexedDB 只是缓存和离线队列；Worker 不保存任何长期状态。
-- Worker 与 API **共享同一套领域服务代码**，作为 TS 包按进程引用。所以 Agent 工具调用就是进程内函数调用，并且经过与 HTTP 请求相同的授权检查（`AuthzContext`）。
+- **真相源**：业务数据和文档都在 PostgreSQL，二进制都在对象存储。浏览器 IndexedDB 只是缓存和离线队列；Worker 本地状态不作为恢复依据；沙箱及 SDK 状态只是执行状态，业务恢复依赖已持久化记录。
+- Worker 与 API **共享同一套领域服务代码**，作为 TS 包按进程引用。Harness 经受限 HTTP/MCP 工具桥接请求领域服务，不能在沙箱内引用领域包或直接写库；桥接执行相同的授权检查（`AuthzContext`），并校验运行身份、租约和幂等键。
 - 实时性：领域事务写入 `outbox` 表，`NOTIFY` 唤醒 API 进程，再经 SSE 推给订阅该项目的浏览器。
 
 ---
@@ -185,6 +194,7 @@ flowchart TB
     http["REST /v1（Fastify）"]
     ssegw["SSE /v1/projects/:id/events"]
     cb["Provider Callbacks /v1/providers/callbacks/:provider"]
+    bridge["内部运行桥接（后续）<br/>工具 / 事件 / 成果；运行身份 + 租约"]
   end
 
   subgraph Domain["领域模块（packages/server-domain，API 与 Worker 共享）"]
@@ -212,6 +222,7 @@ flowchart TB
   end
 
   http --> authz
+  bridge --> authz
   ssegw --> authz
   cb --> jobs
   authz --> projects
@@ -249,71 +260,43 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-  entry1["Chat 消息<br/>POST /v1/ai/sessions/:id/turns"]
-  entry2["技能表单直接生成<br/>POST /v1/recipes/:id/runs"]
-  entry3["直接工具<br/>抠图 / 改尺寸 / 导出"]
-
-  subgraph Guard["安全控制（前置）"]
-    q1["配额与预算检查"]
-    m1["输入审核<br/>文本 + 参考图"]
+  chat["Chat → API：回合请求（后续）"]
+  form["技能表单 → API：recipe 请求"]
+  direct["确定性操作：裁剪 / 改尺寸 / 导出"]
+  guards["控制面：认证 / 项目权限 / 预算 / 输入校验"]
+  scheduler["Worker / ai-runtime<br/>租约、E2B 生命周期、恢复、取消"]
+  subgraph E2B["E2B Sandbox：不可信执行环境（后续）"]
+    harness["apps/harness<br/>受限上下文 / 事件 / 成果 manifest"]
+    sdk["Codex SDK<br/>本地 thread / 代码 / 文件执行"]
   end
+  bridge["控制面 ToolBridge<br/>运行身份 / schema / 租约 / 幂等 / 权限"]
+  recipe["RecipeEngine<br/>版本化确定性步骤"]
+  domain["业务服务<br/>documents / assets / jobs / quotas"]
+  provider["配方 / 图像 / 评估 / 审核适配器"]
+  ingest["成果摄取<br/>校验文件 + ops / Proposal"]
+  events["持久化事件 → outbox → SSE"]
+  data[("PostgreSQL / S3 业务真相源")]
+  model["Codex 已配置模型服务"]
 
-  subgraph Runtime["packages/ai-runtime（在 Worker 的 ai.turn 队列执行）"]
-    loop["AgentLoop<br/>LLM 工具调用循环<br/>步数 / 预算 / 时间上限"]
-    ctx["ContextBuilder<br/>摘要 + 最近消息 + 文档描述 + 预览图"]
-    reg["ToolRegistry<br/>zod schema、授权、计量"]
-    rec["RecipeEngine<br/>确定性步骤 DAG"]
-    evalr["Evaluators<br/>OCR / 视觉一致性 / 文字溢出"]
-  end
-
-  subgraph Tools["Typed Tools（只能调用领域服务）"]
-    t1["board.describe / artboard.describe"]
-    t2["artboard.render_preview"]
-    t3["assets.search / assets.inspect"]
-    t4["recipes.run"]
-    t5["images.generate / images.edit / images.cutout"]
-    t6["artboard.create_from_template / artboard.create_version"]
-    t7["artboard.propose_ops"]
-    t8["board.place_items"]
-    t9["jobs.await"]
-    t10["ask_user"]
-  end
-
-  subgraph Prov["packages/providers"]
-    capreg["CapabilityRegistry<br/>模型能力 / 限制 / 区域 / 单价"]
-    llmA["LLM 适配器"]
-    imgA["Image 适配器"]
-    modA["Moderation 适配器"]
-  end
-
-  outm["输出审核 + AI 标识<br/>（media.ingest 阶段）"]
-  docs[("documents / assets / jobs")]
-
-  entry1 --> Guard --> loop
-  entry2 --> Guard --> rec
-  entry3 --> Guard
-  loop --> ctx
-  loop --> reg --> Tools
-  loop --> llmA
-  t4 --> rec
-  rec --> llmA
-  rec --> t5
-  t5 -->|入队 gen.image| docs
-  Tools --> docs
-  evalr --> imgA
-  rec --> evalr
-  loop --> evalr
-  llmA --> capreg
-  imgA --> capreg
-  docs --> outm --> modA
-  m1 --> modA
+  chat --> guards --> scheduler
+  form --> guards --> recipe
+  direct --> guards --> domain
+  scheduler -.->|创建 / 重连 / 暂停 / 销毁| harness
+  harness --> sdk --> model
+  harness -->|受限业务请求| bridge --> domain
+  bridge --> recipe --> domain
+  recipe --> provider
+  harness -->|运行事件| events
+  harness -->|临时成果| ingest --> domain
+  domain --> data
+  domain --> events
 ```
 
 **说明**
 
-- 三种入口共用同一套 `recipes`、`jobs` 和 `documents` 服务。“技能表单直接生成”与“对话中由 Agent 选择配方”最终执行的是**同一份配方定义**，这是 DOCX“统一任务入口”建议的落地方式。
-- 工具**只能**调用领域服务；没有任何工具能执行代码、访问文件系统或拿到供应商密钥。
-- 预算在工具层强制执行（代码层），不靠提示词约束。
+- 三种入口共用领域服务；固定 recipes 仍在控制面执行，不由沙箱改写定义。
+- Codex 可以在沙箱内操作代码与文件；业务工具不提供任意 SQL、存储主凭证或跨项目写入。沙箱不能直连数据库，所有正式成果由控制面校验后提交。
+- 预算、租约、审批与幂等在控制面强制；SDK 状态和 E2B 状态不代替任务状态。暂停/恢复与业务续跑分别验证。
 
 ---
 
@@ -417,7 +400,9 @@ flowchart TB
   api1 --> kms
   wk --> kms
   Compute --> logs
-  wk --> ext["外部模型与审核 API"]
+  wk --> ext["配方 / 图像模型与审核 API"]
+  wk -.->|后续：生命周期 / 运行桥接| e2b["E2B Sandbox<br/>Harness + Codex SDK<br/>区域与网络条件待验证"]
+  e2b -.-> codexService["已配置的 Codex 模型服务"]
 ```
 
 ### B.7.2 Growth
@@ -452,6 +437,7 @@ flowchart TB
   rdN --> objN
   ml --> objN
   K8s --> obs
+  wkAI -.-> e2bN["E2B Sandbox 池<br/>Harness + Codex SDK"]
 ```
 
 拓扑变化的触发条件见 Part 6 §F.11。
@@ -465,16 +451,17 @@ flowchart LR
   subgraph TB0["信任区 0：不可信"]
     browser["用户浏览器<br/>任意输入、文件、提示词"]
     provOut["供应商返回内容<br/>图片、视频、URL、文本"]
+    agent["E2B Sandbox 内 Harness / Codex<br/>代码、工具参数、事件、成果均不可信"]
   end
 
   subgraph TB1["信任区 1：边界服务"]
     apiE["api：认证、校验、限流、幂等"]
     cbE["回调端点：签名校验"]
+    runtimeE["运行桥接：身份 / 租约 / schema / 幂等"]
   end
 
   subgraph TB2["信任区 2：内部可信"]
     dom["领域服务 + authz"]
-    agent["Agent 循环<br/>LLM 输出视为不可信指令"]
     workers["Worker / Renderer<br/>解析媒体，在隔离进程中执行"]
   end
 
@@ -488,7 +475,9 @@ flowchart LR
   browser -->|"预签名 PUT（单对象、限时、限大小、限类型）"| os
   apiE --> dom
   dom --> db
-  agent -->|"仅限 typed tools，项目范围授权"| dom
+  agent -->|"受限工具 / 事件 / 成果 manifest"| runtimeE
+  runtimeE --> dom
+  runtimeE -->|文件摄取| workers
   workers -->|"下载、解码、重编码"| os
   provOut -->|"出站拉取（URL 白名单）"| workers
   cbE --> dom
@@ -501,7 +490,8 @@ flowchart LR
 1. **浏览器 → 存储**：只能用预签名 URL 上传到 `uploads/` 隔离前缀。对象经 `media.ingest` 校验并重编码后才进入 `assets/`。
 2. **LLM 输出 → 工具**：LLM 的工具参数一律当作不可信输入，先做 schema 校验和授权检查；工具只能访问当前会话所属项目。
 3. **供应商输出 → 资产**：Worker 主动拉取，校验 MIME、尺寸、像素上限和时长，重编码后再审核；没通过审核的内容不会出现在 Board 上。
-4. **密钥**：只有 Worker 和 API 能读 KMS，Agent 上下文里永远不出现密钥或预签名 URL。
+4. **密钥**：只有控制面能读数据库/对象存储/E2B 管理凭证；沙箱只有有期限、绑定运行的能力令牌。Codex 认证方案待集成验证，长期凭证不进入提示词、事件、检查点或日志。
+5. **沙箱**：显式限制出站与入站；临时文件只有经过摄取才能成为资产。失效租约后的工具调用和迟到成果不能写入业务。
 
 ---
 
@@ -514,6 +504,7 @@ flowchart TB
     api["apps/api"]
     worker["apps/worker"]
     renderer["apps/renderer"]
+    harness["apps/harness（E2B 内，后续）"]
   end
 
   subgraph FE["前端包"]
@@ -529,6 +520,9 @@ flowchart TB
   end
 
   render["packages/doc-render（React DOM/SVG）"]
+  hc["packages/harness-client"]
+  sdk["Codex SDK"]
+  e2bSdk["E2B 控制面 SDK"]
 
   subgraph BE["后端包（仅 Node）"]
     domain["packages/server-domain"]
@@ -554,6 +548,10 @@ flowchart TB
   api --> domain
   worker --> domain
   worker --> airt
+  airt --> e2bSdk
+  harness --> hc
+  harness --> sdk
+  hc --> contracts
   renderer --> render
   renderer --> infra
   domain --> core
@@ -575,3 +573,4 @@ flowchart TB
 - `providers` 不能依赖 `server-domain`，因为适配器不知道业务实体。
 - `recipes` 不能直接调用 `providers`，必须经 `ai-runtime` 或 `server-domain` 的任务接口，以保证计量和授权。
 - 任何包都不能依赖 `apps/*`。
+- `apps/harness` / `harness-client` 禁止依赖 `server-domain`、`server-infra` 或数据库驱动；沙箱只消费运行契约。

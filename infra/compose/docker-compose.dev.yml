@@ -1,0 +1,25 @@
+name: design-x
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_DB: designx
+      POSTGRES_USER: designx
+      POSTGRES_PASSWORD: designx-local-only
+    ports: ["127.0.0.1:55432:5432"]
+    volumes: ["postgres:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U designx -d designx"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  storage:
+    image: chrislusf/seaweedfs:3.85
+    command: server -s3 -s3.config=/etc/seaweedfs/s3.json -dir=/data -ip=storage -volume.max=4
+    ports: ["127.0.0.1:58333:8333"]
+    volumes:
+      - storage:/data
+      - ./s3.json:/etc/seaweedfs/s3.json:ro
+volumes:
+  postgres:
+  storage:

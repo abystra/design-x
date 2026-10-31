@@ -1,5 +1,7 @@
 # Part 6 · 中间件与基础设施选型（交付物 F）
 
+2026-10-31 更新：非 AI 阶段沿用本章控制面选型；最终 Agent 宿主已确定为 **E2B Sandbox 内 Harness + Codex SDK**，见 ADR-0001。原供应商/区域假设不能替代该集成的真实验证，本次未重新核查其他依赖版本或许可证。
+
 ## F.0 许可分类图例
 
 | 代号 | 含义 | 商用注意 |
@@ -118,8 +120,10 @@
 | Yjs、Hocuspocus | Phase 4 协作 | MIT [已核验] | OSI |
 | fractional-indexing | 排序键 | CC0 [已核验] | 公共领域 |
 | React、TanStack Router/Query、Zustand、Radix、Zod | 前端基础 | MIT [已核验，React 为通识] | OSI |
-| OpenAI Agents SDK（JS） | 可选的 Agent 辅助库 | MIT [已核验] | OSI |
-| Vercel AI SDK | 可选的供应商抽象 | Apache-2.0 [已核验] | OSI |
+| Codex SDK（`@openai/codex-sdk`） | 用户指定的 E2B 内 Harness 执行接口（后续 AI 阶段） | API 文档已读；具体锁定版本/分发许可在集成前核验 | SDK |
+| E2B Sandbox / 控制面 SDK | 后续 AI 隔离执行与生命周期管理 | 服务条款、账号区域、费用与模板版本在集成前核验 | Managed |
+| OpenAI Agents SDK（JS） | 历史可选方案，不替代已选 Codex SDK | 原稿 MIT 核验记录 | 未选 |
+| Vercel AI SDK | 可选的配方供应商抽象，不作为 Agent 宿主 | Apache-2.0 [原稿已核验] | OSI |
 | Qwen-Image（代码） | 自托管图像模型候选 | Apache-2.0 [已核验：GitHub 仓库 LICENSE；**权重许可需在模型卡单独确认**] | OSI（代码） |
 | SAM 2 | 交互式分割 | Apache-2.0 [已核验] | OSI |
 | BiRefNet | 抠图 | MIT [已核验] | OSI |
@@ -133,6 +137,7 @@
 
 ```text
 MVP：      PostgreSQL · 对象存储 + CDN · KMS · 托管日志与指标 · pg-boss · Chromium Renderer · sharp
+后续 AI：  E2B Sandbox · Harness + Codex SDK · 受限业务工具/事件/成果桥接（尚未实现或验证）
 Phase 2：  + zhparser 中文检索 · + imgproxy（如需要）· + 微信登录
 Phase 3：  + FFmpeg 视频 Worker · + pgvector · + Python ml-worker（如需自托管）
 Phase 4：  + Valkey · + 协作服务（tldraw sync 或 Yjs/Hocuspocus）· + OpenFGA · + 工作流引擎（如达到触发条件）· + K8s
@@ -143,7 +148,8 @@ Phase 4：  + Valkey · + 协作服务（tldraw sync 或 Yjs/Hocuspocus）· + O
 | 维度 | China-first（临时方案） | Global |
 |---|---|---|
 | 云 | 阿里云或火山引擎，单区域 | AWS、GCP 或 Azure；按法域分区部署（EU、US），**数据不跨区复制** |
-| LLM | 豆包、通义千问、DeepSeek | OpenAI、Anthropic、Google；国内模型仅在其国际版（如 BytePlus）可合规使用时考虑 |
+| Agent 宿主 | E2B 内 Codex SDK Harness；区域/网络/账号/数据流需单独验证，不能沿用“仅国内模型”假设 | 同一已选宿主，使用已配置且可用的 Codex 模型 |
+| 配方/评估器 LLM | 豆包、通义千问、DeepSeek（候选，非 Agent 宿主） | 根据配方实际需要配置，不隐式替换 Codex |
 | 图像/视频 | Seedream、Seedance（火山方舟）、Qwen-Image、万相 | GPT Image 2.5（OpenAI [二手：见 architecture-review]）、BytePlus Seedream/Seedance 国际版等。Sora Videos API 已于 2026-09-24 关停 [二手] |
 | 审核 | 国内内容安全服务 | 供应商审核 + 自有分类器 |
 | 合规 | 生成式 AI 登记或备案、显式与隐式标识（GB 45438-2025）、ICP 备案、个人信息保护法（PIPL）、模型名称与备案号公示 | GDPR、EU AI Act 第 50 条透明度义务 [待定：适用范围与时间]、C2PA Content Credentials、各州隐私法 |

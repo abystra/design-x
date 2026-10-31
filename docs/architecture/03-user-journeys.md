@@ -2,10 +2,13 @@
 
 每条流程都列出：**真相源（System of Record, SoR）**、API 调用与事件、任务状态迁移、幂等策略、授权检查和用户可见反馈。端点和事件的完整契约见 Part 7。
 
+**阶段说明**：C.1/C.4/C.5 的非 AI 项目、编辑与恢复链路先实施；C.2/C.3/C.8 的生成、续改和提议是后续目标，C.6 仍为 Phase 3。以下图不表示 Codex/E2B 已实现或验证。
+
 通用约定：
 
 - 所有写请求带 `Idempotency-Key` 头（客户端 UUIDv7），服务端在 `idempotency_keys` 表保存 24 小时。
 - 授权检查记作 `authz(action, resource)`。资源不存在和无权限都返回 `404`，避免泄露资源是否存在。
+- Harness 仅在 E2B 内使用 Codex SDK；图中的 H → API 是受限运行桥接，必须校验运行身份、项目权限、租约与幂等；正式数据仍由控制面写入。
 - 事件通过 SSE `GET /v1/projects/{id}/events` 推送，信封格式见 Part 7 §G.6。
 
 ---
@@ -57,6 +60,7 @@ sequenceDiagram
   participant OS as 对象存储
   participant Q as jobs + pg-boss
   participant WK as Worker
+  participant H as E2B 内 Harness / Codex SDK
   participant P as 图像/LLM 供应商
   participant R as Renderer
   U->>W: 拖入商品图
@@ -75,7 +79,9 @@ sequenceDiagram
   A->>A: authz, 配额预估与预留, 文本输入审核
   A->>Q: ai_turns(status=queued) + job ai.turn
   A-->>W: 202 {turn_id}
-  WK->>WK: AgentLoop 识别技能有对应配方 → recipes.run(product_hero_set@1)
+  WK->>H: 取得运行租约，创建/恢复沙箱与 Codex thread
+  H->>A: 受限工具 recipes.run(product_hero_set@1)
+  A->>Q: 配方任务入队，业务权限/幂等/预算已校验
   WK->>P: LLM：卖点提炼、文案、版式选择（结构化输出）
   WK->>Q: N 个 gen.image 任务（背景/场景图，每个都有 idempotency key）
   A-->>W: SSE ai.turn.updated(step: 生成场景图 0/N)
@@ -89,7 +95,9 @@ sequenceDiagram
   A-->>W: SSE document.committed(board), artboard.created × N
   WK->>Q: render.thumbnail × N
   R-->>A: SSE asset.ready（缩略图）
-  WK-->>A: ai_turns completed, 结算配额
+  WK->>H: 已持久化配方结果，按租约继续回合
+  H-->>A: 最终回复/事件 → 持久化并校验运行状态
+  WK-->>A: ai_turns completed, 结算配额并回收运行资源
   A-->>W: SSE ai.turn.updated(completed), ai.message.completed
   W->>W: Board 视口自动适配新方案组，选中第一个
 ```
@@ -114,21 +122,22 @@ sequenceDiagram
   participant W as Web
   participant A as API
   participant WK as Worker
+  participant H as E2B 内 Harness / Codex SDK
   participant P as 供应商
   U->>W: 选中方案 ab_2，点“继续修改”，输入“换成暖色，标题改为‘秋日上新’”
   W->>A: POST /turns {text, reference:{artboard_id: ab_2, revision: 14}}
   A->>A: authz(artboard.read ab_2)
   A-->>W: 202 {turn_id}
-  WK->>WK: ContextBuilder：artboard.describe(ab_2@14) + 预览图
-  WK->>WK: LLM 规划：只改配色 token 和 headline 文本，无需生成新图
-  WK->>A: artboard.create_version(source=ab_2@14) → 新文档 ab_7（复制 + ops）
+  WK->>H: 运行租约 + 受限上下文：ab_2@14 描述/预览
+  H->>H: Codex SDK 规划：只改配色 token 和 headline 文本
+  H->>A: 受限工具 artboard.create_version(source=ab_2@14) → 新文档 ab_7（复制 + ops）
   A->>A: documents：ab_7.parent=ab_2，在 Board 上紧邻原稿放置，lineage(ai_revision, turn_id)
   A-->>W: SSE artboard.created(ab_7), document.committed(board)
   opt 修改涉及换背景
     WK->>P: images.edit 或 generate（只针对背景 slot）
     WK->>A: artboard.propose_ops 或直接写入 ab_7（ab_7 是新文档，无冲突）
   end
-  WK-->>A: turn completed
+  H-->>A: 回合结果事件；控制面确认持久化后完成 turn
   A-->>W: SSE ai.message.completed “已保留原方案，生成 V2”
   W->>W: Board 上 ab_2 与 ab_7 并列，显示 V1 → V2 连线
 ```
@@ -234,15 +243,19 @@ sequenceDiagram
   participant W as Web
   participant A as API
   participant WK as Worker
+  participant H as E2B 内 Harness / Codex SDK
   participant V as 视频供应商
   participant R as Renderer
   U->>W: “用这 3 张图做 15 秒广告”
   W->>A: POST /turns {text, attachments:[3 张], mode: video}
   A-->>W: 202 {turn_id}
-  WK->>WK: AgentLoop：创建 storyboard 文档（3 个 shot）
-  WK->>A: documents.create(kind=storyboard)
+  WK->>H: 取得租约，创建/恢复 E2B 与 Codex thread
+  H->>A: 受限工具：提议 storyboard 文档（3 个 shot）
+  A->>A: 文档校验后创建 storyboard
   WK->>A: jobs.create gen.video × 3 (idempotency {turn}:{shot})
-  WK->>WK: 调用 jobs.await([j1,j2,j3]) → 回合状态改为 awaiting_jobs，Worker 释放
+  H->>A: 受限工具 jobs.await([j1,j2,j3])
+  A->>A: 保存 waiting_on、检查点引用和事件游标
+  WK->>H: 等待期间按策略暂停沙箱，释放 Worker
   A-->>W: SSE ai.turn.updated(awaiting_jobs), “分镜已生成，3 个片段排队中”
   loop 每个片段
     WK->>V: 提交任务（task_id 存入 jobs.provider_job_id）
@@ -253,8 +266,8 @@ sequenceDiagram
   end
   A->>A: jobs 模块检测到 turn 等待的任务全部进入终态
   A->>WK: 入队 ai.turn(continuation, turn_id)
-  WK->>WK: ContextBuilder 从数据库重建上下文 + 任务结果
-  WK->>A: storyboard.apply_ops（放入片段、字幕）
+  WK->>H: 恢复运行状态与 thread，或从业务上下文显式新建 thread
+  H->>A: 受限工具提交 storyboard ops（放入片段、字幕）
   WK->>A: jobs.create render.video(storyboard@rev)
   WK-->>A: turn completed
   R->>R: FFmpeg 合成，字幕卡由 doc-render 渲染
@@ -264,7 +277,7 @@ sequenceDiagram
 | 项目 | 内容 |
 |---|---|
 | SoR | `documents(kind=storyboard)`、`jobs`、`assets(kind=video_clip)`、`ai_turns.waiting_on_job_ids` |
-| 关键设计 | **没有任何进程在等待期间持有状态**；续跑回合可在任意 Worker 执行；用户关闭浏览器不影响任务 |
+| 关键设计 | **Worker 内存不是恢复依据**；业务状态持久化，SDK 状态按沙箱/检查点策略恢复，不能仅凭 thread ID 假定跨沙箱续跑；用户关闭浏览器不影响任务 |
 | 幂等 | 每个 shot 一个幂等键；续跑以 `turn_id + continuation_seq` 去重，防止多个任务同时完成时重复触发 |
 | 用户反馈 | 分镜卡片逐个变成可播放的片段；任务中心显示“排队 / 生成中 / 已完成 2/3” |
 
@@ -284,6 +297,7 @@ sequenceDiagram
 | 审核拒绝（输出） | `media.ingest` 审核阶段 | 任务 → **blocked** | 产物进入隔离区，不对用户可见，按保留策略删除 | 占位卡显示“该结果未通过内容安全检查”，提供“换个说法重试” |
 | 配额超限 | 提交时预估 + 预留；执行中实际扣减超出 | 提交被拒，返回 `429 QUOTA_EXCEEDED`；执行中超出则回合 → **failed**(`BUDGET_EXHAUSTED`) 并保留已完成部分 | 预留未用完的部分会返还 | 显示剩余额度和重置时间 |
 | 输出 URL 过期 | ingest 下载返回 403/404 | ingesting → waiting_retry；若供应商支持按 task_id 重新取 URL 则重取；否则 **failed**(`OUTPUT_EXPIRED`) | 正常情况下拿到 URL 就立即 ingest，过期只出现在 Worker 长时间宕机后；对账任务会补偿 | “结果已过期，可免费重新生成”（不扣配额） |
+| Harness/沙箱丢失或事件断线 | 运行心跳、租约到期、沙箱状态对账 | runtime 标记失联；回合等待恢复或失败，不能仅凭沙箱状态报成功 | 按运行序号补发事件，恢复可用检查点或显式新建 thread；幂等工具避免重复副作用，旧租约迟到结果拒绝 | “正在恢复执行”或明确失败与重试入口 |
 | Worker 崩溃 | pg-boss 心跳或过期 | 投递层重新投递；业务状态由处理器按阶段幂等续做 | 对账任务每 5 分钟扫描卡住的任务（`updated_at` 超过阈值），重新查询供应商状态 | 无感知或仅有延迟 |
 
 ### C.7.2 时序：部分成功 + 重试 + 审核拦截
@@ -327,12 +341,14 @@ sequenceDiagram
   participant W as Web（编辑器打开 ab_7）
   participant A as API
   participant WK as Worker
+  participant H as E2B 内 Harness / Codex SDK
   U->>W: 对话：“把标题改得更醒目”（选择“修改当前稿”）
   W->>A: POST /turns {reference: ab_7@4, apply_mode: proposal}
-  WK->>WK: 读取 ab_7@4，规划 ops：headline.size 72→96, headline.weight 700→900
+  WK->>H: 准备运行身份与 ab_7@4 受限上下文
+  H->>H: Codex SDK 规划 ops：headline.size 72→96, headline.weight 700→900
   U->>W: 同时修改副标题文字、拖动商品
   W->>A: POST ops (base 4) → revision 5、6
-  WK->>A: artboard.propose_ops {document: ab_7, base_revision: 4, ops}
+  H->>A: 受限工具 artboard.propose_ops {document: ab_7, base_revision: 4, ops}
   A->>A: proposals 表写入 pending；检查与 rev 5、6 的冲突（按节点 id + 属性路径）：无重叠
   A-->>W: SSE proposal.created {proposal_id, summary, touched_paths}
   W->>W: 编辑器顶部显示提议条和差异预览（高亮受影响图层）

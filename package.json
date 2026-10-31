@@ -7,14 +7,53 @@
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "check": "node scripts/check-prototype.mjs && node scripts/check-studio.mjs && node scripts/check-studio-session.mjs"
+    "check": "node scripts/check-prototype.mjs && node scripts/check-studio.mjs && node scripts/check-studio-session.mjs",
+    "dev:web": "vite",
+    "dev:api": "tsx watch apps/api/src/main.ts",
+    "dev:worker": "tsx watch apps/worker/src/main.ts",
+    "dev:renderer": "tsx watch apps/renderer/src/main.ts",
+    "dev:all": "concurrently -k -n web,api,worker,renderer \"pnpm dev:web\" \"pnpm dev:api\" \"pnpm dev:worker\" \"pnpm dev:renderer\"",
+    "infra:up": "docker compose -f infra/compose/docker-compose.dev.yml up -d",
+    "infra:down": "docker compose -f infra/compose/docker-compose.dev.yml down",
+    "db:migrate": "tsx db/migrate.ts",
+    "test:api": "tsx --test apps/api/tests/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "tsx --test tests/unit/*.test.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1161.0",
+    "@aws-sdk/s3-request-presigner": "^3.1161.0",
+    "@fastify/cookie": "^11.1.5",
+    "@fastify/multipart": "^10.1.6",
+    "@fastify/rate-limit": "^11.2.1",
+    "@fontsource-variable/noto-sans-sc": "^5.3.1",
+    "drizzle-orm": "^0.45.4",
+    "fastify": "^5.12.7",
+    "lucide-react": "^0.468.0",
+    "pg": "^8.23.1",
+    "pg-boss": "^12.38.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "lucide-react": "^0.468.0"
+    "sharp": "^0.35.5",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "concurrently": "^10.0.6",
+    "dotenv": "^18.0.9",
+    "esbuild": "^0.28.2",
+    "playwright": "^1.64.1",
+    "prettier": "^3.9.10",
+    "tsx": "^4.23.15",
+    "turbo": "^2.11.10",
+    "typescript": "^7.0.2",
     "vite": "^6.1.0"
+  },
+  "packageManager": "pnpm@10.20.0",
+  "engines": {
+    "node": ">=22.12"
   }
 }
