@@ -41,6 +41,8 @@ pnpm dev:all
 
 原生项目包为 JSON v1（不是 ZIP）：源文件最多 40 MiB，内嵌素材解码后合计 30 MiB、单图 10 MiB，最多 100 张画板、200 个素材、10,000 个图层；未知版本拒绝。图片实际解码并保存为新空间的私有文件。失败源包保留供任务重试，尚未提供长期失败文件的定时清理。完整限制及实测范围见 [Board 与导入说明](docs/implementation/board-import.md)。
 
+Board 使用空间索引与视口虚拟化，仅挂载可见区域及预加载边缘的画板、便签和分区；全选、拖动和组织历史仍覆盖完整数据。预览继续使用共享真实文档渲染，未替换为模拟缩略图。200 画板的固定负载、性能预算、复测命令及限制见 [Board 性能验证](docs/implementation/board-performance.md)；项目包的 100 画板预算保持不变。
+
 ## 验证
 
 ```bash
@@ -70,4 +72,4 @@ pnpm test:import
 - `packages/server-domain`、`server-infra`：领域业务、RLS、事务、队列和 S3。
 - `db/migrations`、`infra/compose`：可重放 SQL 迁移、本地 PostgreSQL / SeaweedFS。
 
-当前是可本地运行和联调的非 AI 版本，尚未作公网生产部署验收。`pnpm build` 只构建 Web 静态文件；API、Worker、Renderer 的生产镜像、进程管理、反向代理及部署流水线尚未交付。邮箱验证/找回、OTP、自动冲突 rebase、DOM Board 空间虚拟化、定时素材 GC、多人实时协作和后续 AI 执行未实现。生产环境需独立配置数据库角色、存储凭证、HTTPS 和备份，不能使用示例开发密码。
+当前是可本地运行和联调的非 AI 版本，尚未作公网生产部署验收。`pnpm build` 只构建 Web 静态文件；API、Worker、Renderer 的生产镜像、进程管理、反向代理及部署流水线尚未交付。邮箱验证/找回、OTP、自动冲突 rebase、定时素材 GC、多人实时协作和后续 AI 执行未实现。低倍率下同时可见的画板仍渲染真实图层，尚无缩略图 LOD。生产环境需独立配置数据库角色、存储凭证、HTTPS 和备份，不能使用示例开发密码。

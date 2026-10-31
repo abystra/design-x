@@ -47,13 +47,15 @@ pnpm test:board
 pnpm test:import
 ```
 
-- `test:unit`：文档 diff/apply 往返与逆向恢复、120 步编辑历史、源文档不被修改、唯一图层 ID、无效排序、尺寸变换、素材引用去重及路径边界。
+- `test:unit`：文档 diff/apply 往返与逆向恢复、120 步编辑历史、源文档不被修改、唯一图层 ID、无效排序、尺寸变换、素材引用边界、Board schema、空间查询与拖动反向查询、初次交接的保存基线。
 - `test:api`：串行执行真实 PostgreSQL/S3 集成用例，媒体用例启动独立 Worker/Renderer 子进程。必须停止长期后台进程，避免它们消费测试刻意保留的离线队列；不用关闭或清空 PostgreSQL/S3。
 - `test:e2e`（`non_ai_journey.py`）：注册个人空间 → 模板实例化 → 中文文本编辑并保存 → 清空 localStorage 后刷新重开 → 上传/摄取并写入资产引用 → 命名版本/恢复 → PNG/PDF 下载 → 文件夹归档/品牌保存 → AI 未接入状态 → 注销重登 → 第二账号资源隔离。
 - `test:editor`（`editor_interactions.py`）：分组/解除分组、对齐、旋转、裁切、画布尺寸、复制/删除与逆向历史，以及未提交草稿恢复、浏览器模拟离线和双标签冲突。是否通过以实际执行记录为准。
 - `test:render`（`render_consistency.mjs`）：比较两份固定文档在实际编辑器 DOM 与独立 Renderer 中的 PNG，覆盖中英文字体/换行、图片适配、旋转、透明度、裁切、隐藏；这是同机 Chromium、1× 的有限样本。
-- `test:board`（`board_features.py`）：便签/分区、显式成员加入移出、混合拖动去重、复制 ID 映射、删除分区保留内容、撤销重做/刷新、真实 409 草稿下载、`.dxproj` 真实下载及空Board从项目列表重开。`--core` 只跑 5 项早期检查并报告 `partial`，正式专项不要带该参数。
+- `test:board`（`board_features.py`）：便签/分区、显式成员加入移出、混合拖动去重、复制 ID 映射、删除分区保留内容、撤销重做/刷新、真实 409 草稿下载、`.dxproj` 真实下载、空Board从项目列表重开及首页需求不编辑即离开的保存。`--core` 只跑 5 项早期检查并报告 `partial`，正式专项不要带该参数。
 - `test:import`（`project_import.py`）：双账户真实项目包导出/导入、Board-only素材、全量支持引用映射、私有权限、刷新续编与再导出、非法版本/文件、390px弹窗/焦点和关闭弹窗后后台完成入口。API准备真实夹具，UI完成导出、导入、编辑操作，无响应伪造。限制与结果见 [Board 与导入验收](board-import.md)。
+- `pnpm test:board-scale --account-file <私有fixture文件>`：在独立的200画板/100便签/20分区真实项目中验证视野外全选、移动、删除/撤销、成员联动、长拖动只保存一次、取消/拖动中快捷键、虚拟卸载后的持续平移、视口重开、精修返回及单次完整Board读取。直接运行时用 `python3 tests/e2e/board_virtualization.py --account-file <文件>`。脚本最后恢复fixture，必须与性能测量串行运行。
+- `perf:seed`、`test:perf`、`test:perf:api`：创建真实200画板夹具，测量固定production构建，检查可选性能预算，以及隔离PG的SQL/响应体/耗时基准。参数与严格比较方法见 [Board 性能验证](board-performance.md)。不要将开发服务器热更新、不同fixture或并行负载混入前后性能对比。
 
 `pnpm check` 包含结构检查和原型规则/会话测试夹具，不代表产品已接入 AI。API 测试、浏览器旅程、专项交互和渲染对比是不同证据，不能互相代替。
 

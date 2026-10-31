@@ -1,5 +1,7 @@
 # Part 4 · 前端架构（交付物 D，含 §2.2 无限画布评估）
 
+> 2026-10-31 非 AI 实施补充：当前保留 React/Vite/CSS 与原型 DOM Board，已实现世界坐标空间 hash、视口/预加载边缘裁剪、局部 RAF 手势和轻量 Board 保存，预览继续复用 `doc-render`。本轮未引入 tldraw/rbush，也未迁移路由或状态库；下表仍是架构推荐，不代表依赖均已落地。200 画板固定负载及实际性能边界见 [Board 性能验证](../implementation/board-performance.md)。
+
 ## D.1 技术栈选择
 
 | 层 | 推荐 | 许可 | 理由 | 备选 |
