@@ -29,7 +29,8 @@
 | 10 | [10-roadmap-and-plan.md](10-roadmap-and-plan.md) | J. 路线图、Backlog、团队与排期、迁移步骤、决策日志、风险、待决问题 |
 | 11 | [11-sources.md](11-sources.md) | 引用来源与核验状态 |
 | 12 | [12-tldraw-adoption-review.md](12-tldraw-adoption-review.md) | AI 创作画布产品研究、tldraw 复评、现有 Board 接入差异与验收阶段 |
-| 13 | [13-creative-ai-platform.md](13-creative-ai-platform.md) | 创作型 AI 平台架构（提议）：生成网关、生成谱系、Agent Runtime 与 MCP 工具面、演进路线 |
+| 13 | [13-creative-ai-platform.md](13-creative-ai-platform.md) | 创作型 AI 平台架构（提议）：生成网关、生成谱系、恢复与计费语义、Agent Runtime 与 MCP 工具面、技术选型总表、演进路线 |
+| 14 | [14-open-source-landscape.md](14-open-source-landscape.md) | 开源 AI 创作平台调研：ComfyUI、InvokeAI、SwarmUI、comfyui-deploy、Jaaz、Toonflow、ArcReel、OpenMontage 等的架构、共性模式、反模式与许可证 |
 
 建议阅读顺序：决策者读 1 → 10；前端读 1 → 4 → 7 → 3；后端和 AI 读 1 → 5 → 7 → 6 → 3；基础设施读 6 → 2 → 9。
 

@@ -1,9 +1,9 @@
 # Part 13 · 创作型 AI 平台架构设计方案
 
-- 日期：2026-11-08
+- 日期：2026-11-08（v2：合并开源调研结论）
 - 状态：**提议（Proposed）**。其中修订 ADR-0001 的部分（§6.3）需用户确认后另立 ADR
 - 关系：补充 [Part 5](05-backend-and-ai.md) 和 [Part 7](07-data-and-interfaces.md)；在 [ADR-0001](../adr/0001-codex-e2b.md) 基础上细化 Agent 层
-- 参考：Design X 现有代码（`apps/harness`、`packages/ai-runtime`、`apps/worker`）、WorkX Codex Harness、开源项目 [infinite-canvas](https://github.com/basketikun/infinite-canvas)（MIT，2026-10-25 快照）
+- 参考：Design X 现有代码（`apps/harness`、`packages/ai-runtime`、`apps/worker`）、WorkX Codex Harness，以及 [Part 14 开源调研](14-open-source-landscape.md)（ComfyUI、InvokeAI、SwarmUI、comfyui-deploy、Jaaz、Toonflow、ArcReel、OpenMontage、infinite-canvas、JarvisHub）。正文中"〔参考：X〕"标出借鉴来源
 - 标注约定同 [README](README.md#标注约定)：[已核验] / [二手] / [假设] / [待定]
 
 ## 0. 摘要
@@ -15,6 +15,7 @@ Design X 的目标是从"AI 可编辑设计"扩展成类似即梦的创作型 AI
 3. **三个可替换接缝**：模型供应商（`GenerationAdapter`）、Agent 宿主（`AgentRuntime`）、执行沙箱（`SandboxProvider`）。产品数据只放在 Design X 控制面，任何一个接缝换实现都不动地基。
 4. **业务工具统一用 MCP 暴露。** 同一套工具既服务平台托管的 Agent（Codex app-server），也服务用户自带的 Agent（本机 Codex 或 Claude Code 通过远程 MCP 接入）。
 5. **合规、成本、地域是一等约束。** 审核、AI 标识、计量账本、部署地域在第一条生成链路里就要做，不留到上线前补。**沙箱和模型的部署地域是当前最大的返工风险，要最先验证。**
+6. **恢复和计费语义要先定死。** 供应商任务 ID 先落库再轮询；孤儿任务不自动重新提交；结果未知时冻结结算；编辑是分叉而不是覆盖。这些规则在 ArcReel、Toonflow、ComfyUI 等项目里都是踩过坑之后才定下的（见 Part 14），Design X 应该在写第一行生成代码前就采用。
 
 ## 1. 背景与目标
 
@@ -155,6 +156,8 @@ erDiagram
 |---|---|
 | `id`, `workspace_id`, `project_id`, `created_by` | 租户与归属，开启 RLS |
 | `origin`, `origin_ref` | `direct \| recipe \| agent \| mcp \| api`，以及对应的 turn、recipe_run 或 MCP 会话 |
+| `destination` | 结果放到哪里：`board:{item_id}`、`artboard:{id}/layer`、`library`。由服务端按它放置产物，前端不再自己判断〔参考：InvokeAI〕 |
+| `batch_id`, `batch_index` | 一次批量提交展开出的多条生成共享 `batch_id`（§6.1） |
 | `capability` | 例如 `image.generate`，见 §5.1 |
 | `provider_model_id`, `model_version` | 指向 `provider_models`，记录实际调用的版本 |
 | `prompt`, `negative_prompt` | 用户原文 |
@@ -174,13 +177,17 @@ erDiagram
 
 `asset_lineage`：在生成提交时写入边 `(from_asset_id, to_asset_id, generation_id, kind)`，用来快速查询"这张图从哪来、派生出了什么"。它可以从 `generations` 重建，但为了查询性能单独物化。
 
+`generation_checkpoints`：在**第一次向供应商提交之前**，在同一事务里写入一份版本化的执行检查点。内容包括实际选中的供应商和模型、归一化后的请求，以及参考素材暂存副本的引用和摘要。恢复和对账只认这份检查点，不再从当前项目状态重新推导请求〔参考：ArcReel ADR 0007〕。
+
+**编辑语义：编辑是分叉。** `derive_kind=edit / inpaint` 只用父产物作底图，编辑指令就是这次的提示词，**不回写**父生成的提示词。编辑失败时父产物不受影响。之后对父生成"再次生成"，会回到原提示词，编辑效果不会被带上——这是分叉语义的固有结果，需要编辑效果时从子生成继续〔参考：ArcReel ADR 0050〕。
+
 ### 4.3 与现有实体的关系
 
 | 现有实体 | 变化 |
 |---|---|
 | `assets` | 新增 `kind=generated`；`provenance` 改为引用 `generation_id`，不再内嵌一份 JSON |
 | `jobs` | `kind=gen.image / gen.video / gen.poll` 指向 `generation_id`；仍是执行状态机 |
-| `model_calls` | 每次供应商调用一行，包括重试和轮询之外的调用；关联 job 和 generation |
+| `model_calls` | 每次供应商调用一行，包括重试和轮询之外的调用；关联 job 和 generation。**generation 和调用是一对多**，账本（`usage_ledger`）是调用的投影：没有真正发给供应商的请求（比如排队中就取消），不产生账单行〔参考：ArcReel ADR 0076〕 |
 | `ai_turns` / `ai_attempts` | 保留。Agent 通过工具触发的生成，其 `origin_ref` 指向 turn |
 | Board 文档 | 新增 `generation` 类型的条目（引用 `generation_id`）和谱系连线，见 §7.1 |
 
@@ -224,6 +231,8 @@ vision.analyze   moderation.text moderation.image
 - `status=deprecated` 的模型仍然能**重放**历史生成（如果供应商还在提供），但新建时不再展示。
 - 模型下线后，历史生成的"再次生成"要明确提示"原模型已下线"，让用户选择替代模型，不能静默替换。
 - 自托管模型（§5.7）也作为普通条目注册，`provider=self-hosted`。
+- **能力桶配置**：每个 workspace（或项目）为每种媒体配置一个默认模型，再按能力细分可选覆盖（例如 `video.i2v` 和多参考图生视频分别指定）。没有配置覆盖的能力回退到默认模型；默认模型不支持该能力时**结构化报错，并告诉用户去配置哪个桶**，绝不自动换成用户没选过的模型〔参考：ArcReel ADR 0054〕。
+- **能力事实只有一份**：界面展示、费用预估、参数约束（时长、分辨率、参考图数量）、Agent 工具查询和实际执行，都从注册表的同一份能力声明求值。
 
 ### 5.3 适配器接口
 
@@ -280,6 +289,14 @@ stateDiagram-v2
 - `job.reconcile` 负责补拉"有 `provider_job_id` 但没有结果"的任务。如果供应商不支持取消，结果晚到时直接丢弃，并删除已转存的对象。
 - 进入终态时结算配额：按实际产出的张数或秒数提交，失败和被拦截的部分返还。
 
+**恢复规则**〔参考：ArcReel ADR 0007、Toonflow `ModelOutcome`〕：
+
+1. **供应商任务 ID 先落库，再进入轮询。** `submit` 返回了 `provider_job_id` 但落库失败时，立刻把生成标为失败，并打一条带固定标记的结构化日志，供运维人工处理；不能在任务 ID 没落库的情况下开始轮询。
+2. **Worker 重启或租约失效后，孤儿生成一律不自动重新提交。** 能恢复的（有检查点、有 `provider_job_id`），恢复轮询；不能恢复的，标为失败并说明原因，由用户决定是否重试。自动重新提交会让用户为同一次请求付多次钱。
+3. **结果未知时冻结结算。** 无法判断供应商是否已经受理（例如提交请求超时）时，状态记为 `unknown`，预留的配额进入 `held`，既不扣也不返还；对账确认后再结算。
+4. **参考素材提交前先物化。** 实际发给供应商的参考图、首尾帧、音频，在提交前复制成不可变的暂存副本并记录摘要；供应商只读这份副本，避免排队期间用户改了素材导致请求和记录不一致。
+5. **413 这类请求体过大错误**，只有在能证明供应商还没受理时，才允许压缩参考图后重试。
+
 ### 5.5 提示词层
 
 - **增强是可选步骤**：用户开启后，用一个廉价 LLM 改写提示词。改写前后都记进 `generations`，界面可以对比、回退。
@@ -289,7 +306,9 @@ stateDiagram-v2
 ### 5.6 背压与公平
 
 - 每个供应商、每个模型各有一组并发令牌；每个 workspace 有生成并发上限；按套餐分优先级队列 [假设]。
+- **图片、视频、音频分通道并发**，避免几分钟一个的视频任务占满图片通道〔参考：ArcReel〕。
 - 对用户展示排队位置和预计耗时，提供方式是 SSE 推送 `generation.progress`。
+- **进度估计**：大多数供应商不返回百分比。网关为每个模型维护近期耗时的 p50/p90，按已等待时间推算进度条；供应商若在响应里给了预估耗时，优先采用〔参考：ComfyUI `poll_op`〕。自托管后端能拿到中间帧时，推送预览缩略图〔参考：InvokeAI `progress_previews`〕。
 - 设全局成本熔断（Part 5 §E.7）。
 
 ### 5.7 自托管模型
@@ -297,6 +316,12 @@ stateDiagram-v2
 触发条件（满足任一）：某个能力的月成本超过阈值；需要供应商不提供的能力（如私有 LoRA、品牌风格模型）；数据不能出域。
 
 做法：`ml-worker`（Python，GPU 池）作为一个 `GenerationAdapter` 接入。如果要用 ComfyUI 一类的工作流后端，**也只作为某个 Adapter 内部的实现细节**，不作为平台的编排层，避免两套编排语义。抠图、高清这类小模型优先自托管（Part 5 已列出 BiRefNet 的许可核验结论）。
+
+自托管时的三条规则：
+
+- **按模型亲和调度。** 调度器知道每台 GPU 机器当前加载了哪些模型，请求优先发给已加载目标模型的机器；某个模型积压时，再让空闲机器加载它。模型冷加载通常要几十秒，这条规则直接决定首图耗时和 GPU 利用率〔参考：SwarmUI `ModelRequestPressure`〕。
+- **工作流版本化部署。** 线上只跑已发布的工作流版本；每个版本带依赖快照（自定义节点、模型文件及其哈希），按版本构建镜像，分 staging 和 production 两个环境。注册表里的模型条目指向某个已发布版本，而不是一份可变的 JSON〔参考：comfyui-deploy〕。
+- **ComfyUI 以独立服务进程运行**，通过它的 HTTP 和 WebSocket API 调用；不把它的代码并入 Design X 的分发包（GPL-3.0，见 [Part 14 §6](14-open-source-landscape.md#6-许可证注意事项)）。
 
 ## 6. 编排层
 
@@ -314,12 +339,17 @@ stateDiagram-v2
 | 局部重绘 / 扩图 / 高清 / 抠图 | 对应的 `image.*` 能力，输入为父产物加 mask 或参数 |
 | 图生视频 | `video.i2v`，`first_frame` 为父产物 |
 
+**批量提交**：请求里可以带 `batch: { mode: "product" | "zip", fields: [{ path, values }] }`。服务端把它展开成多条 generation，共享同一个 `batch_id`，例如"同一个提示词 × 3 种比例 × 2 个模型"展开成 6 条〔参考：InvokeAI `batch × field_values`〕。批量提交时**整批预估、整批预留配额**：预留不足就整批拒绝，不出现"跑了一半没额度"的情况。
+
 ### 6.2 Recipe 引擎
 
 延续 Part 5 §E.4.2：代码定义、版本化、每步有 schema、预算、超时和幂等键。补充三点：
 
 - Recipe 里的生成步骤**一律调用生成网关**，产出普通的 `generations`。这样谱系、计量、审核都不需要特殊处理。
 - 长时子任务（比如视频）用 `job_waiters` 挂起，不占用 Worker。
+- **每个 Recipe 都声明预算和门槛**：`budget`（积分上限）、`max_wall_time`、每个阶段的 `max_revisions`，以及评审门槛（评估器分数、OCR 比对、渲染后检查）。控制面强制执行这些上限，超出就停在当前阶段并请用户决定〔参考：OpenMontage pipeline 清单〕。
+- **确定性步骤按输入签名缓存。** 布局计算、模板填充、渲染预览这类纯函数步骤，用输入的哈希做缓存键；用户只改了文案时，抠图和背景生成不必重跑〔参考：ComfyUI `caching.py`〕。**生成步骤不缓存**，同样的输入再次生成就应该得到新结果。
+- **渲染后自检**：视频类 Recipe 在最终交付前，用 ffprobe 检查时长和码率、抽帧检查是否黑帧、检查音频电平，不通过就不报告成功〔参考：OpenMontage〕。
 - 引入工作流引擎（Temporal、Restate、DBOS 等）的触发条件：单个 Recipe 超过约 20 步或包含人工审批；或批次超过 1,000 个子任务（Part 10 已列）；或 pg-boss 加 awaiter 的状态机复杂到难以测试 [假设]。触发前不引入。
 
 ### 6.3 Agent Runtime
@@ -369,6 +399,8 @@ type AgentEvent =
 - **真相源是业务上下文**：会话消息、Board 和 Artboard 当前版本、已确认的工具调用、生成记录。任何一轮都能从这些数据重建 thread。
 - **原生 thread 续接只是优化**：同一个沙箱还活着时，用 `thread/resume` 节省 token 和延迟。**不把 Codex 原生会话文件当作持久化格式**，因为它是上游的内部格式，随版本变化。WorkX 保存原生文件再恢复的做法不作为 Design X 的地基。
 - **沙箱按会话复用**：同一个 AI 会话内多轮复用一个沙箱，空闲时暂停，超时后销毁 [假设：以 E2B 暂停和恢复的实测成本与延迟为准]。不再每一轮新建沙箱。
+- **会话命令串行化**：每个 AI 会话在控制面由一个会话执行者独占，发送、中断、回答提问、撤回排队消息都进入同一个命令队列串行处理，避免并发命令把宿主状态弄乱〔参考：ArcReel `SessionActor`〕。
+- **对话记录镜像到数据库**：宿主产生的事件按 `AgentEvent` 归一化后全部落库，界面只读数据库里的事件流，不直接读宿主的原生记录。
 
 #### 6.3.4 工具面（MCP）
 
@@ -384,6 +416,12 @@ type AgentEvent =
 
 工具设计参考 infinite-canvas：底层提供一个判别联合的 `apply_ops`，上层提供 `create_image_prompt_flow`、`run_generation` 这类高层工具，减少 Agent 的调用步数和出错面。
 
+三条工具规则：
+
+- **按能力定义工具，不按模型。** 只有一个 `generations.create(capability, model?, ...)`，模型是参数，受注册表约束。不做"一个模型一个工具"——模型一多，工具清单就会膨胀，换模型还要改工具〔反例：Jaaz〕。Agent 通过 `models.list(capability)` 查询可用模型和能力。
+- **工具只声明一次。** 工具定义（名称、schema、权限、成本类别、副作用类别）放在 `packages/agent-tools`，平台托管的 Agent 和远程 MCP 都从这份声明生成，不维护两份〔参考：ArcReel〕。
+- **确定性操作交给工具，不让模型自由生成。** 读写画板、创建任务、查询状态、布局、合成都是工具；模型只负责决策和内容。
+
 所有工具调用都带稳定的 `tool_call_id`，Tool Gateway 逐次校验租约、租户、权限、schema、预算和幂等（ADR-0001）。
 
 #### 6.3.5 用户自带 Agent（BYO Agent）
@@ -391,6 +429,12 @@ type AgentEvent =
 - 对外提供远程 MCP 端点 `/mcp`，用 OAuth 授权，令牌限定项目、工具集、预算和有效期。
 - 用户在自己电脑上的 Codex 或 Claude Code 里添加这个 MCP 后，就能操作云端 Board。Agent 的算力和 token 由用户承担，生成费用仍然从平台积分扣。
 - 写操作照样走 Proposal，网页端可以确认，和平台托管的 Agent 一样。
+
+#### 6.3.6 编排结构与轨迹
+
+- **主 Agent 加聚焦子 Agent。** 主 Agent 负责判断当前状态、选择下一步、调用确定性工具、分派子 Agent、在需要时等用户确认。子 Agent 各管一件事（例如分镜拆分、文案、资产生成、审图），大段原始材料和中间推理留在子 Agent 内部，只把摘要和结果引用交回主 Agent，避免主上下文膨胀〔参考：ArcReel、Toonflow、Jaaz〕。
+- **创作流程用技能描述**：例如"商品套图"、"海报系列"、"短视频分镜"，每个技能写明阶段、每阶段的评审门槛和需要用户确认的节点。它和 Recipe 的区别是：Recipe 由代码执行，技能由 Agent 执行；技能里的预算和门槛同样由控制面强制。
+- **轨迹落库**：每一步的观察（画布摘要的哈希）、动作（工具调用）、结果、成本都记进 `agent_trajectories`。它用于排查问题、建评测集和比较不同 Agent 宿主〔参考：JarvisHub〕。
 
 ## 7. 画布、资产与可编辑性
 
@@ -410,6 +454,18 @@ type AgentEvent =
 ### 7.3 位图转可编辑
 
 `image.decompose`（图层分解）、`image.cutout`（抠图）、OCR 识别文字 → `doc-core` 组装成 Artboard v1。文字变成真实文字节点，可以修改。这条链路是 Design X 的差异化能力，放在 G2 阶段。
+
+### 7.4 画布上的编辑实体
+
+局部重绘、扩图、区域引导需要在画布上画蒙版、框选区域。这些是**一等实体**，不是临时的界面状态：蒙版、控制图、参考区域各自是 Board 上可保存、可复用的对象，作为输入素材进入 generation 的 `inputs`（role 为 `mask`、`reference` 等）〔参考：InvokeAI `controlLayers`〕。实现上用 tldraw 自定义 shape 加离屏 canvas 绘制蒙版 [假设：G2 前做 spike]。
+
+### 7.5 产物时效
+
+一张图或一个 Artboard 被下游使用之后，上游可能又改了（例如 Artboard 改了文案，用它导出的参考图已经生成了视频）。规则如下〔参考：ArcReel ADR 0062〕：
+
+- **写入时只记事实，读取时再推导结论**：每个派生产物登记它所依据的上游版本和内容摘要；"是否过时"在读取时对比当前上游推导出来，不在上游变更时去回写下游。
+- **过时（stale）不等于不可用**：过时产物照样可以查看、使用、导出，界面只提示"上游已更新"，并提供"按新内容重新生成"。
+- **四种状态分开**：产物时效、生成状态、批量准入结论、单条执行结果，各自独立，不混成一个字段。
 
 ## 8. 异步、事件与实时
 
@@ -435,6 +491,8 @@ type AgentEvent =
 
 - **积分模型**：用户看到的是积分，内部同时记录人民币成本。价格表版本化（`price_books`），每次生成记录所用的价格版本。
 - 流程是预估、预留、结算、返还，账本只追加（Part 5 §E.7）。**提交前在界面上显示预估积分。**
+- **结算有第三种结果：冻结。** 供应商是否受理不确定时，预留进入 `held`，对账后再扣或返还（§5.4）。
+- **成本价和售价分开记**：`model_calls` 记供应商成本（人民币），账本记用户积分；价格表里同时配置两者，毛利可以按模型统计〔参考：Toonflow〕。
 - Agent 回合单独计量：LLM token、沙箱时长、工具触发的生成分别记账，汇总到 turn。
 - 防滥用：新账号限额、并发上限、异常速率检测、全局成本熔断。
 
@@ -470,6 +528,35 @@ flowchart LR
 ```
 
 按 Part 5 §E.2.3 的触发条件拆分服务。首个拆出的大概率是 gen-worker（按能力扩缩），其次是 Tool Gateway 和远程 MCP（独立暴露面）[假设]。
+
+### 12.1 技术选型总表
+
+"现有"指 2026-11-08 仓库里已经在用的依赖；其余是提议，按阶段引入。
+
+| 层 | 组件 | 选型 | 状态 |
+|---|---|---|---|
+| 前端 | 框架 | React 19 + Vite + TypeScript | 现有 |
+| 前端 | Board 画布 | tldraw 5.6.0（生产环境需商业许可，见 Part 10 Q5） | 现有 |
+| 前端 | Artboard 编辑与渲染 | React DOM/SVG，编辑、缩略图、导出共用一套（AD-04） | 现有 |
+| 前端 | 蒙版与区域编辑 | tldraw 自定义 shape + 离屏 canvas（§7.4） | G2 提议 |
+| 前端 | 视频时间线 | G4 评估：自研轻量时间线，或 Remotion（公司使用的许可条款待核验） | G4 待定 |
+| 接入 | API | Fastify 5 + Zod 4，REST + SSE | 现有 |
+| 接入 | 远程 MCP | `@modelcontextprotocol/sdk`（TypeScript），OAuth 范围令牌 | G3 提议 |
+| 编排 | 任务队列 | pg-boss 12，加 `jobs` 业务状态机 | 现有 |
+| 编排 | 工作流引擎 | 满足 §6.2 触发条件后评估 Temporal、Restate、DBOS | 待定 |
+| 编排 | Agent 宿主 | Codex app-server（主适配器）；`codex exec`（现状）；Claude Agent SDK 等作为备选适配器 | G3 提议 |
+| 编排 | 沙箱 | E2B 2.62（现有）→ 自托管 E2B 或国内替代（`SandboxProvider`） | G0 待定 |
+| 能力 | 生成网关 | `packages/generation`，进程内库 | G1 提议 |
+| 能力 | 图片和视频模型 | 国内供应商（如火山方舟 Seedream 和 Seedance、通义万相、可灵、Vidu 等），逐个核实开通状态、价格和备案 | G0 待定 |
+| 能力 | 自托管生成 | ComfyUI 独立服务 + 模型亲和调度 + 版本化部署；`ml-worker`（Python） | 成本触发 |
+| 能力 | 媒体处理 | sharp/libvips（现有）；FFmpeg（G4） | 现有 / G4 |
+| 能力 | 导出渲染 | Playwright + Chromium | 现有 |
+| 能力 | 审核 | 云厂商内容安全服务 | G1 待定 |
+| 数据 | 数据库 | PostgreSQL + Drizzle ORM，开启 RLS | 现有 |
+| 数据 | 向量检索 | pgvector（需确认托管 PostgreSQL 是否支持） | G2 评估 |
+| 数据 | 对象存储 | S3 兼容（本地 SeaweedFS，线上云对象存储）+ CDN | 现有 |
+| 横切 | 可观测 | OpenTelemetry；`model_calls`、`agent_trajectories` | G1 提议 |
+| 工程 | Monorepo | pnpm + turbo；依赖方向用 lint 规则强制（核心领域包不依赖 HTTP 框架和 Agent SDK）〔参考：ArcReel import-linter〕 | 现有 / 提议 |
 
 ## 13. 现状差距
 
@@ -508,7 +595,10 @@ flowchart LR
 | AD-16 | 沙箱与模型的部署地域；`SandboxProvider` 接口 | 待定（G0 验证） |
 | AD-17 | 远程 MCP 对外开放（BYO Agent） | 提议 |
 | AD-18 | 插件隔离：前端插件只能在 iframe 或 Worker 里运行；模型适配只在服务端注册 | 提议 |
-| AD-19 | Agent 会话以业务上下文为真相源；原生 thread 只作缓存 | 提议 |
+| AD-19 | Agent 会话以业务上下文为真相源；原生 thread 只作缓存；会话命令串行化 | 提议 |
+| AD-20 | 生成恢复规则：任务 ID 先落库；孤儿生成不自动重新提交；结果未知时冻结结算；提交前写检查点并物化参考素材 | 提议 |
+| AD-21 | 编辑即分叉；产物时效"写时记事实、读时算结论" | 提议 |
+| AD-22 | Agent 工具按能力定义、只声明一次，内嵌 Agent 和远程 MCP 共用 | 提议（并入 AD-15 也可） |
 
 ## 16. 风险
 
