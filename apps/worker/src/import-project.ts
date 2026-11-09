@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
 import sharp from 'sharp';
+import { config } from '../../../packages/server-infra/src/config.js';
+import { versionUrl } from '../../../packages/server-domain/src/assets.js';
 import { tenantTransaction } from '../../../packages/server-infra/src/db.js';
-import { getObject,putObject,deleteObject } from '../../../packages/server-infra/src/storage.js';
+import { getObject,putObject,deleteObject,legacyReadBucket } from '../../../packages/server-infra/src/storage.js';
 import { ArtboardSchema } from '../../../packages/doc-core/src/index.js';
 import { BoardSchema } from '../../../packages/doc-core/src/board.js';
 import { IMPORT_LIMITS,parsePortableProject,decodePortableAsset,importedId,invalidImport } from '../../../packages/server-domain/src/import-format.js';
@@ -9,12 +11,12 @@ import { emit,jobDto,saveVersion,syncAssetRefs } from '../../../packages/server-
 import { updateJob } from '../../../packages/server-domain/src/jobs.js';
 import { assertActive } from './process.js';
 
-type PreparedAsset={id:string,hash:string,title:string,bytes:Buffer,thumbnail:Buffer,width:number,height:number,key:string,thumbnailKey:string};
+type PreparedAsset={id:string,versionId:string,hash:string,title:string,bytes:Buffer,thumbnail:Buffer,width:number,height:number,key:string,thumbnailKey:string};
 // Only delete this attempt's staging objects. A committed asset always wins over cleanup.
 export async function cleanupImportStaging(workspaceId:string,jobId:string,keys:string[]){
   const owned=keys.filter(key=>typeof key==='string'&&key.startsWith(`${workspaceId}/imports/${jobId}/`));
   if(!owned.length)return;
-  const live=await tenantTransaction(workspaceId,async tx=>(await tx.query('SELECT object_key,thumbnail_key FROM assets WHERE object_key=ANY($1) OR thumbnail_key=ANY($1)',[owned])).rows);
+  const live=await tenantTransaction(workspaceId,async tx=>(await tx.query('SELECT object_key,thumbnail_key FROM assets WHERE object_key=ANY($1) OR thumbnail_key=ANY($1) UNION ALL SELECT object_key,thumbnail_key FROM asset_versions WHERE object_key=ANY($1) OR thumbnail_key=ANY($1)',[owned])).rows);
   const retained=new Set(live.flatMap(row=>[row.object_key,row.thumbnail_key]));
   for(const key of owned)if(!retained.has(key))await deleteObject(key);
 }
@@ -23,7 +25,7 @@ export async function importProject(job:any){
   if(typeof projectId!=='string'||!job.payload.sourceKey?.startsWith(`${workspaceId}/imports/sources/`))throw new Error('导入任务来源无效');
   const priorKeys=Array.isArray(job.payload.importStaging)?job.payload.importStaging:[];
   if(priorKeys.length)await cleanupImportStaging(workspaceId,job.id,priorKeys);
-  const source=await getObject(job.payload.sourceKey);
+  const source=await getObject(job.payload.sourceKey,{bucket:job.payload.sourceBucket||legacyReadBucket()});
   if(createHash('sha256').update(source.bytes).digest('hex')!==job.payload.sha256)throw new Error('导入文件校验失败');
   const packet=parsePortableProject(source.bytes);
   const prepared:PreparedAsset[]=[],byHash=new Map<string,PreparedAsset>(),sourceMap=new Map<string,PreparedAsset>();
@@ -47,7 +49,7 @@ export async function importProject(job:any){
     outputBytes+=png.length+thumbnail.length;
     if(outputBytes>IMPORT_LIMITS.outputBytes)invalidImport('标准化素材超过 64 MiB 存储预算');
     const assetId=importedId(job.id,'asset',decoded.hash),prefix=`${workspaceId}/imports/${job.id}/${job.execution_token}/${assetId}`;
-    const asset={id:assetId,hash:decoded.hash,title:`导入素材 ${prepared.length+1}`,bytes:png,thumbnail,width,height,key:`${prefix}.png`,thumbnailKey:`${prefix}.webp`};
+    const asset={id:assetId,versionId:importedId(job.id,'asset-version',decoded.hash),hash:createHash('sha256').update(png).digest('hex'),title:`导入素材 ${prepared.length+1}`,bytes:png,thumbnail,width,height,key:`${prefix}.png`,thumbnailKey:`${prefix}.webp`};
     prepared.push(asset);byHash.set(decoded.hash,asset);sourceMap.set(url,asset);
     if(prepared.length%5===0)await updateJob(workspaceId,job.id,{progress:10+Math.floor(prepared.length/Math.max(1,Object.keys(packet.assets).length)*25)},job.execution_token);
   }
@@ -55,6 +57,7 @@ export async function importProject(job:any){
   const docIds=new Map(packet.documents.map(doc=>[doc.id,importedId(job.id,'document',doc.id)]));
   const boardInput=sourceBoard?BoardSchema.parse(sourceBoard.content):BoardSchema.parse({title:packet.title,results:artboards.map((doc,index)=>({id:doc.id,position:{x:index*310,y:0}}))});
   const itemIds=new Map(docIds);
+  for(const item of boardInput.results)if(item.kind==='image'){if(itemIds.has(item.id))invalidImport('图片条目与文档 ID 重复');itemIds.set(item.id,importedId(job.id,'image',item.id));}
   for(const note of boardInput.notes){if(itemIds.has(note.id))invalidImport('便签 ID 与文档 ID 重复');itemIds.set(note.id,importedId(job.id,'note',note.id));}
   for(const section of boardInput.sections){if(itemIds.has(section.id))invalidImport('分区 ID 与其他项目内容 ID 重复');itemIds.set(section.id,importedId(job.id,'section',section.id));}
   const removedKeys=new Set(['workspaceId','workspace_id','userId','user_id','ownerId','owner_id','sessionId','session_id','token','accessToken','refreshToken']);
@@ -63,10 +66,10 @@ export async function importProject(job:any){
   // A package may carry different bytes for an old asset's original and thumbnail.
   // Bare references prefer the original; records with their own URL use that exact resource.
   for(const [url,asset] of sourceMap){
-    const oldId=url.match(/^\/api\/assets\/([^/]+)\/(file|thumbnail)$/);
+    const oldId=url.match(/^\/api\/assets\/([^/]+)(?:\/versions\/[^/]+)?\/(file|thumbnail)$/);
     if(oldId&&(!assetIds.has(oldId[1])||oldId[2]==='file'))assetIds.set(oldId[1],asset.id);
   }
-  const recordAsset=(value:any)=>['url','image','src','thumbnail'].map(key=>sourceMap.get(value[key])).find(Boolean);
+  const recordAsset=(value:any)=>value.kind==='image'?sourceMap.get(`/api/assets/${value.assetId}/versions/${value.assetVersionId}/file`):['url','image','src','thumbnail'].map(key=>sourceMap.get(value[key])).find(Boolean);
   function collectIds(value:any):void{
     if(Array.isArray(value)){value.forEach(collectIds);return;}
     if(!value||typeof value!=='object')return;
@@ -79,7 +82,7 @@ export async function importProject(job:any){
   function remap(value:any,key='',path='board'):any{
     if(typeof value==='string'){
       if(humanFields.has(key))return value;
-      const asset=sourceMap.get(value);if(asset)return `/api/assets/${asset.id}/file`;
+      const asset=sourceMap.get(value);if(asset)return versionUrl(asset.id,asset.versionId);
       if(key==='projectId'||key==='project_id')return projectId;
       if(itemIds.has(value))return itemIds.get(value);
       if(assetIds.has(value))return assetIds.get(value);
@@ -95,6 +98,7 @@ export async function importProject(job:any){
       for(const [childKey,child] of Object.entries(value))if(!removedKeys.has(childKey))result[childKey]=remap(child,childKey,`${path}.${childKey}`);
       const asset=recordAsset(value);
       if(asset){
+        if(value.kind==='image')result.assetVersionId=asset.versionId;
         if(value.id&&!itemIds.has(value.id))result.id=asset.id;
         for(const field of ['assetId','asset_id'])if(field in value)result[field]=asset.id;
         if('status'in result)result.status='ready';
@@ -106,15 +110,17 @@ export async function importProject(job:any){
   const designs=new Map<string,any>();
   for(const doc of artboards){
     const original=ArtboardSchema.parse(doc.content);
-    const nodes=original.nodes.map(node=>({...node,id:importedId(job.id,`node:${doc.id}`,node.id),...(node.groupId?{groupId:importedId(job.id,`group:${doc.id}`,node.groupId)}:{}),...(node.src?{src:`/api/assets/${sourceMap.get(node.src)!.id}/file`}:{})}));
+    const nodes=original.nodes.map(node=>({...node,id:importedId(job.id,`node:${doc.id}`,node.id),...(node.groupId?{groupId:importedId(job.id,`group:${doc.id}`,node.groupId)}:{}),...(node.src?{src:versionUrl(sourceMap.get(node.src)!.id,sourceMap.get(node.src)!.versionId)}:{})}));
     designs.set(doc.id,ArtboardSchema.parse({...original,nodes}));
   }
   const board=BoardSchema.parse({...remap(boardInput),id:projectId,title:packet.title||'导入项目',results:boardInput.results.map(result=>{
+    const mapped=remap(result);
+    if(result.kind==='image')return {...mapped,projectId,persisted:true};
     const doc=artboards.find(doc=>doc.id===result.id)!;
-    const mapped=remap(result);delete mapped.design;delete mapped.revision;
+    delete mapped.design;delete mapped.revision;
     return {...mapped,id:docIds.get(result.id),documentId:docIds.get(result.id),projectId,title:doc.title||result.title||'导入画板',persisted:true};
   })});
-  const primaryOriginal=packet.primaryArtboardId||boardInput.results[0]?.id||artboards[0].id;
+  const primaryOriginal=packet.primaryArtboardId||boardInput.results.find(item=>item.kind!=='image')?.id||artboards[0].id;
   const primaryId=docIds.get(primaryOriginal)!,primaryDesign=designs.get(primaryOriginal);
   const keys=prepared.flatMap(asset=>[asset.key,asset.thumbnailKey]);
   await tenantTransaction(workspaceId,async tx=>{
@@ -135,7 +141,12 @@ export async function importProject(job:any){
       if(active?.status!=='running'||active.execution_token!==job.execution_token)throw new Error('导入已取消或由新执行接管');
       // All rows and the job's successful result commit together. A redelivery cannot create a second project.
       await tx.query('INSERT INTO projects(id,workspace_id,title,type,image,color,primary_artboard_id) VALUES($1,$2,$3,$4,$5,$6,$7)',[projectId,workspaceId,packet.title||'导入项目','设计作品',primaryDesign.nodes.find((node:any)=>node.type==='image')?.src||null,primaryDesign.background,primaryId]);
-      for(const asset of prepared)await tx.query("INSERT INTO assets(id,workspace_id,title,mime,bytes,width,height,object_key,thumbnail_key,status) VALUES($1,$2,$3,'image/png',$4,$5,$6,$7,$8,'ready')",[asset.id,workspaceId,asset.title,asset.bytes.length,asset.width,asset.height,asset.key,asset.thumbnailKey]);
+      for(const asset of prepared){
+        await tx.query("INSERT INTO assets(id,workspace_id,title,mime,bytes,width,height,object_key,thumbnail_key,status,storage_bucket) VALUES($1,$2,$3,'image/png',$4,$5,$6,$7,$8,'ready',$9)",[asset.id,workspaceId,asset.title,asset.bytes.length,asset.width,asset.height,asset.key,asset.thumbnailKey,config.s3Bucket]);
+        await tx.query("INSERT INTO asset_versions(id,workspace_id,asset_id,object_key,thumbnail_key,bucket,bytes,sha256,mime,width,height,source) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'image/png',$9,$10,$11)",[asset.versionId,workspaceId,asset.id,asset.key,asset.thumbnailKey,config.s3Bucket,asset.bytes.length,asset.hash,asset.width,asset.height,JSON.stringify({kind:'import',attemptId:job.id})]);
+        await tx.query('UPDATE assets SET current_version_id=$2 WHERE id=$1',[asset.id,asset.versionId]);
+        await tx.query('INSERT INTO project_assets(workspace_id,project_id,asset_id) VALUES($1,$2,$3)',[workspaceId,projectId,asset.id]);
+      }
       for(const original of artboards){
         const design=designs.get(original.id);
         const doc=(await tx.query("INSERT INTO documents(id,workspace_id,project_id,kind,title,content) VALUES($1,$2,$3,'artboard',$4,$5) RETURNING *",[docIds.get(original.id),workspaceId,projectId,original.title||'导入画板',JSON.stringify(design)])).rows[0];
@@ -147,7 +158,7 @@ export async function importProject(job:any){
       await emit(tx,workspaceId,'project.created',{projectId,source:'import'});await emit(tx,workspaceId,'job.updated',jobDto(updated));
       return completed;
     });
-    await deleteObject(job.payload.sourceKey).catch(()=>{});
+    if((job.payload.sourceBucket||legacyReadBucket()||config.s3Bucket)===config.s3Bucket)await deleteObject(job.payload.sourceKey).catch(()=>{});
     return result;
   }catch(error){
     await cleanupImportStaging(workspaceId,job.id,keys).catch(cleanupError=>console.error('Import staging cleanup deferred',cleanupError));

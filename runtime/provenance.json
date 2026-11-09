@@ -1,0 +1,76 @@
+{
+  "source": "WorkX",
+  "commit": "f81c31a3b09d13d8955248ec7bdefbdfc1f08a6e",
+  "codexVersion": "0.166.0",
+  "upstreamTestedCodexVersion": "0.144.0",
+  "targetAcceptance": "pending real E2B template validation",
+  "modifications": [
+    "Rename namespace and environment variables",
+    "Codex RPC accepts explicit unprivileged process uid/gid",
+    "Retain matfs project manifest semantics; only trusted control plane defines scope",
+    "New Design X adapter, journal, command protocol, and TypeScript lease/session integration replace WorkX business dependencies",
+    "Charge all fetched bytes, including failed integrity reads and oversize verification bytes, against matfs attempt read budgets; add regression coverage"
+  ],
+  "files": [
+    {
+      "source": "runtime/runner/src/workx_runner/codex_rpc.py",
+      "sourceSha256": "8670c30865af3ed11bdc1a22457a10d14a7e40997c8979f3937fab4932874d5d",
+      "target": "runtime/runner/src/designx_runner/codex_rpc.py",
+      "targetSha256": "20011b8507b7d30b610471243042290d7fb3f242bcd67df93a94b5945a8de45e"
+    },
+    {
+      "source": "runtime/runner/tests/test_codex_rpc.py",
+      "sourceSha256": "71856aa4851ff422d9966162a91e9cee46419bc3d330376ee85757b72028954f",
+      "target": "runtime/runner/tests/test_codex_rpc.py",
+      "targetSha256": "2527d8663332703dd41ea7653ba789a40d6708e546e0ba252af344dc851fbe77"
+    },
+    {
+      "source": "runtime/matfs/main.go",
+      "sourceSha256": "30cc91e2894f71c1e6b7fe3f828d55f07e5e80ae9c28f9442859b9c40bce67a3",
+      "target": "runtime/matfs/main.go",
+      "targetSha256": "a58c418f4732500eebb56d9cd9450b15bdfc102851376f7777821ae642efa5c7"
+    },
+    {
+      "source": "runtime/matfs/fs.go",
+      "sourceSha256": "0518d488e3b1bd17bd5ffb2579367ec9c1c0457ff366e98ba4e4c573c1a6cfeb",
+      "target": "runtime/matfs/fs.go",
+      "targetSha256": "0518d488e3b1bd17bd5ffb2579367ec9c1c0457ff366e98ba4e4c573c1a6cfeb"
+    },
+    {
+      "source": "runtime/matfs/store.go",
+      "sourceSha256": "c6d40300b99a3bb8b15a3ecbdfe9044cfbcfc4cf1d59ee6d66b07637c21b567c",
+      "target": "runtime/matfs/store.go",
+      "targetSha256": "d5e557ec2a59c8479b472de70b1d9029971a8eb6c6c7bb16f2186f31a8d6ea29"
+    },
+    {
+      "source": "runtime/matfs/manifest.go",
+      "sourceSha256": "0637f5882f660257f87943f91af35b901f896f325b849cddedb9f07de634c940",
+      "target": "runtime/matfs/manifest.go",
+      "targetSha256": "0637f5882f660257f87943f91af35b901f896f325b849cddedb9f07de634c940"
+    },
+    {
+      "source": "runtime/matfs/matfs_test.go",
+      "sourceSha256": "747e718d4c4b751785517d37a02580514fef612554ab044093320ac897a4505c",
+      "target": "runtime/matfs/matfs_test.go",
+      "targetSha256": "84a9b45290003e457cf1376ddb928d064d25e42d33597e0e49ded58cc91d8a0b"
+    },
+    {
+      "source": "runtime/matfs/go.mod",
+      "sourceSha256": "47b274f33baadabd176bca532ed5a236b66aebabe96701659252ba509ce08637",
+      "target": "runtime/matfs/go.mod",
+      "targetSha256": "47b274f33baadabd176bca532ed5a236b66aebabe96701659252ba509ce08637"
+    },
+    {
+      "source": "runtime/matfs/go.sum",
+      "sourceSha256": "5cbe8aac43d73b390fddf0a41f0f54f24bb83a2bb765eec752f4bf584fe4cb73",
+      "target": "runtime/matfs/go.sum",
+      "targetSha256": "5cbe8aac43d73b390fddf0a41f0f54f24bb83a2bb765eec752f4bf584fe4cb73"
+    },
+    {
+      "source": "runtime/matfs/build.py",
+      "sourceSha256": "b0f5f0eb3b7d60f26e0b22088a3fb6e42a02fd494f8c4d4e8fe8f8dea7ac1f8e",
+      "target": "runtime/matfs/build.py",
+      "targetSha256": "d7b671fcd9d9e028096a23148e5fb87c296882c14aa390c4a77f31bd90e3bacc"
+    }
+  ]
+}

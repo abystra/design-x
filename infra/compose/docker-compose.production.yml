@@ -1,0 +1,42 @@
+name: design-x-v2
+x-service: &service
+  image: ${DESIGNX_IMAGE:?Set an immutable image digest}
+  env_file: [../../.env.production]
+  restart: unless-stopped
+  init: true
+  read_only: true
+  tmpfs: [/tmp]
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+services:
+  api:
+    <<: *service
+    command: [node, --import, tsx, apps/api/src/main.ts]
+    environment: {API_HOST: 0.0.0.0, PORT: '3001'}
+    ports: ['127.0.0.1:3001:3001']
+  generation:
+    <<: *service
+    command: [node, --import, tsx, apps/worker/src/main.ts]
+    environment: {WORKER_ROLE: generation}
+  media:
+    <<: *service
+    command: [node, --import, tsx, apps/worker/src/main.ts]
+    environment: {WORKER_ROLE: media}
+  agent:
+    <<: *service
+    command: [node, --import, tsx, apps/worker/src/main.ts]
+    environment: {WORKER_ROLE: agent}
+  import:
+    <<: *service
+    command: [node, --import, tsx, apps/worker/src/main.ts]
+    environment: {WORKER_ROLE: import}
+  renderer:
+    <<: *service
+    image: ${DESIGNX_RENDERER_IMAGE:?Set an immutable renderer image digest}
+    command: [node, --import, tsx, apps/renderer/src/main.ts]
+    shm_size: 1gb
+  web:
+    image: ${DESIGNX_WEB_IMAGE:?Set an immutable web image digest}
+    restart: unless-stopped
+    depends_on: [api]
+    ports: ['127.0.0.1:8080:80']

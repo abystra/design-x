@@ -8,8 +8,12 @@ export async function reconcileJobs(){
  const boss=await startQueue();
  const workspaces=(await pool.query('SELECT id FROM workspaces')).rows;
  for(const workspace of workspaces){
-  const jobs=await tenantTransaction(workspace.id,async tx=>(await tx.query("SELECT * FROM jobs WHERE status IN ('queued','running') AND updated_at<now()-interval '30 seconds' ORDER BY updated_at LIMIT 100")).rows);
+  const jobs=await tenantTransaction(workspace.id,async tx=>(await tx.query("SELECT * FROM jobs WHERE kind NOT LIKE 'generation.%' AND status IN ('queued','running') AND updated_at<now()-interval '30 seconds' ORDER BY updated_at LIMIT 100")).rows);
   for(const job of jobs){
+   if(job.kind==='ai.turn'){
+    const v2=await tenantTransaction(workspace.id,async tx=>(await tx.query("SELECT 1 FROM ai_turns t JOIN ai_attempts a ON a.turn_id=t.id WHERE t.id=$1 AND t.runtime_protocol='designx-runner-v2' AND a.status='active' AND a.id=$2 AND a.deadline_at>now()",[job.id,job.execution_token])).rowCount);
+    if(v2)continue; // Durable Runner journal owns observer recovery and unknown outcomes.
+   }
    const queueJob=await boss.getJobById(job.kind,job.queue_id);
    if(queueJob?.state==='failed'||queueJob?.state==='cancelled')await updateJob(workspace.id,job.id,{status:'failed',error:'后台执行已中断，可重新尝试'},job.execution_token);
    else if(!queueJob&&Date.now()-new Date(job.updated_at).getTime()>5*60000)await updateJob(workspace.id,job.id,{status:'failed',error:'任务投递记录已失效，请重新尝试'},job.execution_token);

@@ -1,0 +1,68 @@
+{
+  "build": {
+    "alias": "designx-runner-v2",
+    "name": "designx-runner-v2",
+    "tags": [
+      "default"
+    ],
+    "templateId": "nmz2omb8ebmzkis6mq8c",
+    "buildId": "dad74640-ea56-4f38-9abc-18682f293968",
+    "pinnedTemplate": "nmz2omb8ebmzkis6mq8c:dad74640-ea56-4f38-9abc-18682f293968",
+    "codexVersion": "0.166.0",
+    "sourceCommit": "f81c31a3b09d13d8955248ec7bdefbdfc1f08a6e",
+    "buildDigest": "be516c7c511d722bd23ca8b11edf0bce5b8937b1e58a5e89bbbc5903333abd59",
+    "sourceHashes": {
+      "infra/e2b/Dockerfile": "cce0d62254fe7a786d3dc9f21463ec5b94c948718a21a794a44edc46d5315df8",
+      "runtime/runner/pyproject.toml": "69376eaeac7f86231859b7bb3d3ab53c7fef26ae71af5fcbf6c27b85106f4499",
+      "packages/ai-runtime/src/deepseek-models.json": "dde93bfa07c217d5ed4c597a3ec350d7454028f350556f126fa953ab9d0cff63",
+      "runtime/matfs/dist/designx-matfs": "ca52fe61ac6a9d26f2e3a94dac02e7b1b6a9e9f6b523eb5238914b5f77e1ea26",
+      "runtime/matfs/dist/provenance.json": "066850e4a602310e9e8a7280740b3ab29a755dda7f9587dc9a783d1d047b71c1",
+      "runtime/provenance.json": "3c037b47b3a582a0a8f6e7ce6a5fbf7fac2976bba81eed1576c60fa32b766a73",
+      "infra/e2b/dist/validate.mjs": "b8edcbdd6de55167bc02fcd53d5bfe36d64c2c05a6a24ec3098f917b90e6cd8d",
+      "runtime/runner/src/designx_runner/__init__.py": "541fe86f574c9c579ccd287f776502718e79dc287ad984b3638dccd5f3490a81",
+      "runtime/runner/src/designx_runner/__main__.py": "6663a198e84fef211d681c54e9f844cf24a5668bd15af991c673289dd72572ec",
+      "runtime/runner/src/designx_runner/adapter.py": "f498b82d8893de8b9732f4983d54ef38bd0eeefc466ee054fe5d37929380648b",
+      "runtime/runner/src/designx_runner/codex_rpc.py": "20011b8507b7d30b610471243042290d7fb3f242bcd67df93a94b5945a8de45e",
+      "runtime/runner/src/designx_runner/protocol.py": "1cc9b29397f3b9db5bb7fd900ab7989c42d8fb478c91b5146d6fd67e7a36dc7a"
+    },
+    "createdAt": "2026-11-08T17:28:49.888Z"
+  },
+  "verification": {
+    "matfsGoTests": {
+      "passed": 8,
+      "cases": [
+        "manifest validation",
+        "gzip decoding",
+        "verified cache concurrency",
+        "tampered/oversized rejection",
+        "read budget",
+        "failed integrity reads remain charged",
+        "oversize verification byte charged",
+        "interrupted reads retain bounded reservation"
+      ]
+    },
+    "kernelSmoke": {
+      "template": "nmz2omb8ebmzkis6mq8c:dad74640-ea56-4f38-9abc-18682f293968",
+      "passed": true,
+      "binarySha256": "ca52fe61ac6a9d26f2e3a94dac02e7b1b6a9e9f6b523eb5238914b5f77e1ea26",
+      "checks": {
+        "files": [],
+        "writeDenied": true,
+        "rootProcessDenied": true,
+        "rootCacheDenied": true
+      },
+      "network": "deny-all; no R2 request or real storage credentials",
+      "verifiedAt": "2026-11-08T17:28:54.908Z"
+    },
+    "nativeRunnerSourceUnchanged": true,
+    "nativeAcceptanceReference": {
+      "file": "infra/e2b/acceptance-2026-11-08.json",
+      "template": "nmz2omb8ebmzkis6mq8c:a9fa36e9-1f76-4455-a31e-563cfa4862c4",
+      "note": "Real two-turn, tool-bridge, observer recovery and native question-stop acceptance ran on the referenced build. No repeated model calls were made for this matfs-only change."
+    }
+  },
+  "remainingGates": [
+    "Independent Design X R2 bucket data-plane authorization and live mounted-material acceptance"
+  ],
+  "cleanedUp": true
+}

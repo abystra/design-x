@@ -1,6 +1,6 @@
 // Resolve an explicit quantity before submitting a potentially paid turn.
 // Consume the complete numeric token: “12张” must never become “2张”.
-export function resolveAiCount(selection, prompt) {
+export function resolveAiCount(selection, prompt, maxCount = 3) {
   const token = prompt.match(
     /(-?\d+(?:\.\d+)?|[零〇一二两三四五六七八九十百千万亿萬億壹贰叁肆伍陆柒捌玖拾佰仟]+)\s*(?:张|个|幅|套)/,
   )?.[1];
@@ -22,7 +22,9 @@ export function resolveAiCount(selection, prompt) {
         ? 1
         : (chinese[token] ?? Number(token))
       : Number(selection);
-  if (!Number.isInteger(value) || value < 1 || value > 3)
-    throw new Error("每次创作支持 1–3 个方案，请调整数量或分次创作。");
+  if (!Number.isInteger(value) || value < 1 || value > maxCount)
+    throw new Error(
+      `每次创作支持 1–${maxCount} 个方案，请调整数量或分次创作。`,
+    );
   return value;
 }

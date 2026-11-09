@@ -695,6 +695,9 @@ export default memo(
       runtime.settle();
       runtime.editor.updateInstanceState({ isReadonly: disabled });
       runtime.editor.setCurrentTool(tool);
+      // tldraw ignores shape creation while readonly. An accepted API result
+      // may arrive during submission/upload, so replay domain state on unlock.
+      if (!disabled) runtime.apply();
     }, [ready, runtime, tool, disabled]);
     useImperativeHandle(
       ref,

@@ -1,9 +1,9 @@
 import { PgBoss } from 'pg-boss';
 import { config } from './config.js';
 import type { Tx } from './db.js';
-export const queues=['media.ingest','render.export','project.import','ai.turn'] as const;
+export const queues=['media.ingest','render.export','project.import','ai.turn','generation.submit','generation.ingest'] as const;
 export const aiTurnTimeoutSeconds=Math.max(600,Math.min(1800,Number(process.env.AI_TURN_TIMEOUT_SECONDS)||600));
-export function queuePolicy(queue:string){return queue==='ai.turn'?{retryLimit:0,retryDelay:2,expireInSeconds:aiTurnTimeoutSeconds+120}:{retryLimit:2,retryDelay:2,expireInSeconds:queue==='project.import'?180:60};}
+export function queuePolicy(queue:string){return queue==='generation.submit'?{retryLimit:0,retryDelay:2,expireInSeconds:Math.ceil(config.imageTimeoutMs/1000)+180}:queue==='ai.turn'?{retryLimit:0,retryDelay:2,expireInSeconds:aiTurnTimeoutSeconds+120}:{retryLimit:2,retryDelay:2,expireInSeconds:queue==='project.import'||queue==='generation.ingest'?180:60};}
 let boss:PgBoss|undefined;
 export async function startQueue() {
  if(boss)return boss;

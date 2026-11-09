@@ -1,0 +1,66 @@
+{
+  "build": {
+    "alias": "designx-runner-v2",
+    "name": "designx-runner-v2",
+    "tags": [
+      "default"
+    ],
+    "templateId": "nmz2omb8ebmzkis6mq8c",
+    "buildId": "a9fa36e9-1f76-4455-a31e-563cfa4862c4",
+    "pinnedTemplate": "nmz2omb8ebmzkis6mq8c:a9fa36e9-1f76-4455-a31e-563cfa4862c4",
+    "codexVersion": "0.166.0",
+    "sourceCommit": "f81c31a3b09d13d8955248ec7bdefbdfc1f08a6e",
+    "buildDigest": "11badb5f4378c51991bc21a00249847d8c88bf78224a9381922072e0af59b56d",
+    "sourceHashes": {
+      "infra/e2b/Dockerfile": "cce0d62254fe7a786d3dc9f21463ec5b94c948718a21a794a44edc46d5315df8",
+      "runtime/runner/pyproject.toml": "69376eaeac7f86231859b7bb3d3ab53c7fef26ae71af5fcbf6c27b85106f4499",
+      "packages/ai-runtime/src/deepseek-models.json": "dde93bfa07c217d5ed4c597a3ec350d7454028f350556f126fa953ab9d0cff63",
+      "runtime/matfs/dist/designx-matfs": "d53f935f19a061d362883e7589a2a165c8e97b3597c03f7e32611e3f99547bdf",
+      "runtime/matfs/dist/provenance.json": "f65800039813b1f41b49bdfd39f0ec0e23a7aadb262d5204f18171313bd85ba2",
+      "runtime/provenance.json": "f4a1d2cf595144090a04be60acf9d27639b67d57c39d3ae9463fcc398967ed71",
+      "infra/e2b/dist/validate.mjs": "b8edcbdd6de55167bc02fcd53d5bfe36d64c2c05a6a24ec3098f917b90e6cd8d",
+      "runtime/runner/src/designx_runner/__init__.py": "541fe86f574c9c579ccd287f776502718e79dc287ad984b3638dccd5f3490a81",
+      "runtime/runner/src/designx_runner/__main__.py": "6663a198e84fef211d681c54e9f844cf24a5668bd15af991c673289dd72572ec",
+      "runtime/runner/src/designx_runner/adapter.py": "f498b82d8893de8b9732f4983d54ef38bd0eeefc466ee054fe5d37929380648b",
+      "runtime/runner/src/designx_runner/codex_rpc.py": "20011b8507b7d30b610471243042290d7fb3f242bcd67df93a94b5945a8de45e",
+      "runtime/runner/src/designx_runner/protocol.py": "1cc9b29397f3b9db5bb7fd900ab7989c42d8fb478c91b5146d6fd67e7a36dc7a"
+    },
+    "createdAt": "2026-11-08T17:09:28.833Z"
+  },
+  "acceptance": {
+    "passed": true,
+    "template": "nmz2omb8ebmzkis6mq8c:a9fa36e9-1f76-4455-a31e-563cfa4862c4",
+    "codexVersion": "0.166.0",
+    "elapsedMs": 46566,
+    "observerReconnect": true,
+    "toolBridgeCalls": 1,
+    "questionStop": {
+      "passed": true,
+      "elapsedMs": 5590
+    },
+    "records": [
+      {
+        "round": 0,
+        "sandboxId": "irx8vqqx72u6dcjgh8ir9",
+        "threadId": "01a1bc23-3f26-7bf3-b2e9-77c743d6ab94",
+        "summary": "400×400 白色背景画板，中央仅放置一条可编辑文字“Design X 云端验收”。",
+        "artboardCount": 1,
+        "textNodes": 1
+      },
+      {
+        "round": 1,
+        "sandboxId": "irx8vqqx72u6dcjgh8ir9",
+        "threadId": "01a1bc23-3f26-7bf3-b2e9-77c743d6ab94",
+        "summary": "延续上一轮：400×400 白色背景画板，仅一条可编辑文字，更新为“Design X 第二轮”。",
+        "artboardCount": 1,
+        "textNodes": 1
+      }
+    ],
+    "verifiedAt": "2026-11-08T17:10:15.836Z"
+  },
+  "remainingGates": [
+    "Design X R2 account live material mount isolation/tamper/expiry/read-budget verification",
+    "Full production deployment and backup/restore rehearsal are outside this local cloud smoke test"
+  ],
+  "cleanedUp": true
+}

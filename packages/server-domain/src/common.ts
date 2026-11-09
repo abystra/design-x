@@ -12,14 +12,17 @@ export async function emit(tx: Tx, workspaceId: string, type: string, payload: u
  await tx.query("SELECT pg_notify('designx_events',$1)",[workspaceId]);
  return rows[0].id;
 }
-export const assetUrlPattern = /^\/api\/assets\/([a-zA-Z0-9-]+)\/(?:file|thumbnail)$/;
+export const assetUrlPattern = /^\/api\/assets\/([a-zA-Z0-9-]+)(?:\/versions\/([a-zA-Z0-9-]+))?\/(?:file|thumbnail)$/;
 const samplePattern = /^\/assets\/(coffee|skincare|interior|fashion|headphones|nature)\.jpg$/;
 export async function validateSources(tx: Tx, design: any) {
  const assetIds=new Set<string>();
  for (const node of design.nodes || []) {
    if (node.type!=='image' || !node.src) continue;
    const match=assetUrlPattern.exec(node.src);
-   if (match) assetIds.add(match[1]);
+   if (match) {
+     assetIds.add(match[1]);
+     if(match[2] && !(await tx.query('SELECT id FROM asset_versions WHERE id=$1 AND asset_id=$2',[match[2],match[1]])).rowCount)throw new HttpError(400,'INVALID_ASSET_VERSION','素材版本无效');
+   }
    else if (!samplePattern.test(node.src)) throw new HttpError(400,'INVALID_ASSET','请先上传图片到素材库');
  }
  for (const assetId of assetIds) {
@@ -31,10 +34,15 @@ export async function validateSources(tx: Tx, design: any) {
 export async function syncAssetRefs(tx: Tx, workspaceId: string, documentId: string, design: any) {
  const refs=await validateSources(tx,design);
  await tx.query('DELETE FROM asset_refs WHERE document_id=$1',[documentId]);
- for (const assetId of refs) await tx.query('INSERT INTO asset_refs(workspace_id,asset_id,document_id) VALUES($1,$2,$3)',[workspaceId,assetId,documentId]);
+ for (const assetId of refs) {
+  await tx.query('INSERT INTO asset_refs(workspace_id,asset_id,document_id) VALUES($1,$2,$3)',[workspaceId,assetId,documentId]);
+  // An explicit document edit is an authorized association. Preserve explicit revocations.
+  await tx.query('INSERT INTO project_assets(workspace_id,project_id,asset_id) SELECT $1,project_id,$2 FROM documents WHERE id=$3 ON CONFLICT(project_id,asset_id) DO NOTHING',[workspaceId,assetId,documentId]);
+ }
+ for(const node of design.nodes||[]){const match=assetUrlPattern.exec(node.src||'');if(match?.[2])await tx.query('INSERT INTO asset_version_refs(workspace_id,version_id,document_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[workspaceId,match[2],documentId]);}
 }
 export async function saveVersion(tx: Tx, workspaceId: string, doc: any, name?: string) {
  await tx.query('INSERT INTO document_versions(id,workspace_id,project_id,document_id,revision,name,content) VALUES($1,$2,$3,$4,$5,$6,$7)',[id(),workspaceId,doc.project_id,doc.id,doc.revision,name||null,JSON.stringify(doc.content)]);
 }
-export function assetDto(row:any) { return { id: row.id, title: row.title, image:`/api/assets/${row.id}/file`,thumbnail:`/api/assets/${row.id}/thumbnail`,type:'图片',category:'我的上传',status:row.status,error:row.error,bytes:Number(row.bytes),width:row.width,height:row.height,createdAt:row.created_at }; }
+export function assetDto(row:any) { return { id: row.id, title: row.title, versionId:row.current_version_id,image:row.current_version_id?`/api/assets/${row.id}/versions/${row.current_version_id}/file`:`/api/assets/${row.id}/file`,thumbnail:row.current_version_id?`/api/assets/${row.id}/versions/${row.current_version_id}/thumbnail`:`/api/assets/${row.id}/thumbnail`,type:'图片',category:'我的上传',status:row.status,error:row.error,bytes:Number(row.bytes),width:row.width,height:row.height,createdAt:row.created_at }; }
 export function jobDto(row:any) { return { id:row.id,type:row.kind,kind:row.kind,projectId:row.project_id,status:row.status,progress:row.progress,error:row.error,result:row.result,attempts:row.attempts,createdAt:row.created_at,updatedAt:row.updated_at,downloadUrl:row.status==='succeeded'&&row.kind==='render.export'?`/api/exports/${row.id}/file`:null }; }

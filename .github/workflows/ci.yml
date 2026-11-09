@@ -1,0 +1,30 @@
+name: Design X verification
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: {version: 10.20.0}
+      - uses: actions/setup-node@v4
+        with: {node-version: 22, cache: pnpm}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - uses: actions/setup-go@v5
+        with: {go-version-file: runtime/matfs/go.mod, cache-dependency-path: runtime/matfs/go.sum}
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: docker compose -f infra/compose/docker-compose.dev.yml up -d --wait
+      - run: pnpm db:migrate
+      - run: pnpm typecheck && pnpm test:unit && pnpm test:api && pnpm check && pnpm build
+      - run: python -m pip install "pytest>=8,<10" "pytest-asyncio>=0.24,<2"
+      - run: python -m pytest runtime/runner/tests -q
+        env: {PYTHONPATH: runtime/runner/src}
+      - run: go test ./...
+        working-directory: runtime/matfs
+      - if: always()
+        run: docker compose -f infra/compose/docker-compose.dev.yml down

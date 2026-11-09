@@ -1,9 +1,10 @@
 import { readFile } from "node:fs/promises";
+import { resolve } from 'node:path';
 import { validateManifest } from "../../../packages/ai-runtime/src/manifest.js";
 
 try {
   validateManifest(
-    JSON.parse(await readFile("/home/user/designx/work/artifact.json", "utf8")),
+    JSON.parse(await readFile(resolve(process.cwd(), 'artifact.json'), "utf8")),
   );
   process.stdout.write("Artifact schema is valid.\n");
 } catch (error: any) {

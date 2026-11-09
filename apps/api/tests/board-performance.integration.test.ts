@@ -3,8 +3,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
-import { setTimeout as delay } from "node:timers/promises";
 import pg from "pg";
+import { disposeTestDatabase } from './helpers/database.js';
 
 // Fixed 200 × 50-node fixture in a real temporary database, independent of dev workers.
 const adminUrl =
@@ -161,22 +161,7 @@ test.after(async () => {
   await app.close();
   await stopQueue();
   await pool.end();
-  for (let attempt = 0; attempt < 100; attempt++) {
-    if (
-      Number(
-        (
-          await admin.query(
-            "SELECT count(*) FROM pg_stat_activity WHERE datname=$1",
-            [databaseName],
-          )
-        ).rows[0].count,
-      ) === 0
-    )
-      break;
-    await delay(50);
-  }
-  await admin.query(`DROP DATABASE "${databaseName}"`);
-  await admin.end();
+  await disposeTestDatabase(admin, databaseName);
 });
 
 test("200-Artboard lean save has constant SQL count and a small authoritative revision acknowledgement", async (t) => {

@@ -113,3 +113,11 @@
   font-size: 11px;
   cursor: pointer;
 }
+
+.st-agent-questions { margin: 12px 0; }
+.st-agent-questions fieldset { border: 1px solid #e6dfd2; border-radius: 8px; padding: 10px; margin: 8px 0; }
+.st-agent-questions legend { font-size: 11px; color: #877b65; padding: 0 5px; }
+.st-agent-questions label { display: flex; align-items: flex-start; gap: 7px; padding: 5px 0; font-size: 12px; }
+.st-agent-questions label small { display: block; color: #827b70; font-size: 10px; }
+.st-agent-questions input:not([type=radio]) { width: 100%; margin: 7px 0; padding: 8px; border: 1px solid #e7e1d7; border-radius: 6px; background: #fff; font: inherit; font-size: 12px; }
+.st-agent-questions input[type=radio] { margin-top: 3px; }

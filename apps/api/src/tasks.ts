@@ -1,3 +1,4 @@
+import { freezeRenderInputs } from '../../../packages/server-domain/src/render-inputs.js';
 import { idempotent } from '../../../packages/server-domain/src/idempotency.js';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -18,6 +19,8 @@ export async function taskRoutes(app:FastifyInstance) {
  app.get('/api/jobs/:id',async(req:any)=>tenantTransaction(req.identity.workspace.id,async tx=>{const job=(await tx.query(`SELECT ${jobStatusColumns} FROM jobs WHERE id=$1 AND (project_id IS NULL OR EXISTS (SELECT 1 FROM projects p WHERE p.id=jobs.project_id AND p.deleted_at IS NULL))`,[req.params.id])).rows[0];if(!job)notFound();return jobDto(job);}));
  app.post('/api/jobs/:id/retry',async(req:any)=>tenantTransaction(req.identity.workspace.id,async tx=>{
   const current=(await tx.query("SELECT * FROM jobs WHERE id=$1 AND (project_id IS NULL OR EXISTS (SELECT 1 FROM projects p WHERE p.id=jobs.project_id AND p.deleted_at IS NULL)) FOR UPDATE",[req.params.id])).rows[0];if(!current)notFound();
+  if(current.kind.startsWith('generation.'))throw new HttpError(409,'GENERATION_EXPLICIT_ACTION_REQUIRED','请使用生成记录的再次生成或重试摄取操作');
+  if(current.kind==='ai.turn'&&(await tx.query("SELECT 1 FROM ai_attempts WHERE turn_id=$1 AND outcome='unknown'",[current.id])).rowCount)throw new HttpError(409,'AI_RECONCILIATION_REQUIRED','此回合执行结果未知，请核对工具副作用后显式创建新回合');
   if(!['failed','cancelled'].includes(current.status))throw new HttpError(409,'INVALID_JOB_STATE','只有失败或取消的任务可以重试');
   const queueId=id();const job=(await tx.query("UPDATE jobs SET status='queued',progress=0,error=NULL,execution_token=NULL,queue_id=$1,updated_at=now() WHERE id=$2 RETURNING *",[queueId,current.id])).rows[0];
   if(current.kind==='media.ingest'){if(!(await tx.query("UPDATE assets SET status='pending',error=NULL WHERE id=$1 AND deleted_at IS NULL",[current.payload.assetId])).rowCount)notFound();}
@@ -28,6 +31,7 @@ export async function taskRoutes(app:FastifyInstance) {
  app.post('/api/jobs/:id/cancel',async(req:any)=>{
   const result=await tenantTransaction(req.identity.workspace.id,async tx=>{
    const current=(await tx.query("SELECT * FROM jobs WHERE id=$1 AND (project_id IS NULL OR EXISTS (SELECT 1 FROM projects p WHERE p.id=jobs.project_id AND p.deleted_at IS NULL)) FOR UPDATE",[req.params.id])).rows[0];if(!current)notFound();
+   if(current.kind.startsWith('generation.'))throw new HttpError(409,'GENERATION_EXPLICIT_ACTION_REQUIRED','请从生成记录取消，以同时记录取消意图和配额');
    if(['succeeded','failed','cancelled'].includes(current.status))return current;
    const job=(await tx.query("UPDATE jobs SET status='cancelled',error=NULL,updated_at=now() WHERE id=$1 RETURNING *",[current.id])).rows[0];
    await emit(tx,req.identity.workspace.id,'job.updated',jobDto(job));return job;
@@ -41,13 +45,14 @@ export async function taskRoutes(app:FastifyInstance) {
   const doc=(await tx.query("SELECT * FROM documents WHERE id=$1 AND project_id=$2 AND kind='artboard'",[body.documentId||project.document_id,project.id])).rows[0];if(!doc)notFound();
   if(doc.content.width*body.scale>16384||doc.content.height*body.scale>16384||doc.content.width*doc.content.height*body.scale**2>40000000)throw new HttpError(400,'EXPORT_TOO_LARGE','导出像素超出限制，请降低倍率');
   const documents=body.format==='dxproj'?(await tx.query('SELECT id,kind,title,content,revision FROM documents WHERE project_id=$1',[project.id])).rows:undefined;
-  const job=await idempotent(tx,req.identity.workspace.id,req.headers['idempotency-key'],{route:'export.create',projectId:project.id,body},()=>createJob(tx,req.identity.workspace.id,'render.export',{...body,format:body.format==='jpg'?'jpeg':body.format,documentId:doc.id,revision:doc.revision,design:doc.content,title:body.format==='dxproj'?project.title:doc.title||project.title,primaryArtboardId:project.document_id,documents},project.id));
+  const assetVersions=await freezeRenderInputs(tx,doc.content,documents);
+  const job=await idempotent(tx,req.identity.workspace.id,req.headers['idempotency-key'],{route:'export.create',projectId:project.id,body},()=>createJob(tx,req.identity.workspace.id,'render.export',{...body,format:body.format==='jpg'?'jpeg':body.format,documentId:doc.id,revision:doc.revision,design:doc.content,title:body.format==='dxproj'?project.title:doc.title||project.title,primaryArtboardId:project.document_id,documents,assetVersions},project.id));
   reply.code(202);return job;
  }));
  app.get('/api/exports/:id/file',async(req:any,reply)=>{
   const job=await tenantTransaction(req.identity.workspace.id,async tx=>(await tx.query("SELECT j.* FROM jobs j JOIN projects p ON p.id=j.project_id WHERE j.id=$1 AND j.kind='render.export' AND p.deleted_at IS NULL",[req.params.id])).rows[0]);
   if(!job)notFound();if(job.status!=='succeeded')throw new HttpError(409,'EXPORT_NOT_READY','导出尚未完成');
-  const result=await getObject(job.result.objectKey);reply.type(result.contentType);reply.header('Content-Disposition',`attachment; filename*=UTF-8''${encodeURIComponent(job.result.filename)}`);return result.bytes;
+  const result=await getObject(job.result.objectKey,{bucket:job.result.storageBucket||process.env.LEGACY_S3_BUCKET||undefined});reply.type(result.contentType);reply.header('Content-Disposition',`attachment; filename*=UTF-8''${encodeURIComponent(job.result.filename)}`);return result.bytes;
  });
  const streams=new Set<()=>void>();
  const listeners=new Map<string,Set<()=>void>>();

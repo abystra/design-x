@@ -17,6 +17,7 @@ const stageText = {
   running: "正在构思设计",
   tool: "正在制作可编辑方案",
   validating: "正在检查设计",
+  awaiting_input: "等待你的回答",
   succeeded: "创作完成",
   cancelled: "已停止创作",
   failed: "创作未完成",
@@ -27,6 +28,7 @@ export default function AgentTurns({ agent, onLocate, onApply, onError }) {
   const [pending, setPending] = useState(""),
     [previewError, setPreviewError] = useState("");
   const dialog = useRef(null);
+  const [answers, setAnswers] = useState({});
   useEffect(() => {
     setPreviewError("");
     if (preview && dialog.current && !dialog.current.open)
@@ -44,6 +46,11 @@ export default function AgentTurns({ agent, onLocate, onApply, onError }) {
   };
   return (
     <>
+      {agent.session?.boundaryReason && (
+        <p className="st-agent-refresh-error" role="status">
+          创作上下文已重新建立：{agent.session.boundaryReason}
+        </p>
+      )}
       {agent.error && (
         <p role="status" className="st-agent-refresh-error">
           创作动态暂时无法刷新：{agent.error}
@@ -92,6 +99,114 @@ export default function AgentTurns({ agent, onLocate, onApply, onError }) {
                 </button>
               </div>
             )}
+            {(agent.interactions || [])
+              .filter(
+                (interaction) =>
+                  interaction.turnId === turn.id &&
+                  interaction.status === "pending",
+              )
+              .map((interaction) => (
+                <form
+                  className="st-agent-questions"
+                  key={interaction.id}
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    act(interaction.id, () =>
+                      agent.answer(
+                        turn,
+                        interaction,
+                        Object.fromEntries(
+                          interaction.questions.map((question) => [
+                            question.id,
+                            {
+                              answers: [
+                                answers[`${interaction.id}:${question.id}`] ||
+                                  "",
+                              ],
+                            },
+                          ]),
+                        ),
+                      ),
+                    );
+                  }}
+                >
+                  {interaction.questions.map((question) => (
+                    <fieldset key={question.id}>
+                      <legend>{question.header || "创作助手提问"}</legend>
+                      <p>{question.question}</p>
+                      {question.options?.map((option) => (
+                        <label key={option.label}>
+                          <input
+                            type="radio"
+                            name={`${interaction.id}:${question.id}`}
+                            value={option.label}
+                            checked={
+                              answers[`${interaction.id}:${question.id}`] ===
+                              option.label
+                            }
+                            onChange={(event) =>
+                              setAnswers((previous) => ({
+                                ...previous,
+                                [`${interaction.id}:${question.id}`]:
+                                  event.target.value,
+                              }))
+                            }
+                          />
+                          <span>
+                            {option.label}
+                            <small>{option.description}</small>
+                          </span>
+                        </label>
+                      ))}
+                      <input
+                        aria-label={`${question.question} 自定义回答`}
+                        type={question.isSecret ? "password" : "text"}
+                        autoComplete="off"
+                        maxLength={4000}
+                        value={
+                          answers[`${interaction.id}:${question.id}`] || ""
+                        }
+                        onChange={(event) =>
+                          setAnswers((previous) => ({
+                            ...previous,
+                            [`${interaction.id}:${question.id}`]:
+                              event.target.value,
+                          }))
+                        }
+                        placeholder="填写你的回答"
+                        required
+                      />
+                    </fieldset>
+                  ))}
+                  <button
+                    type="submit"
+                    className="st-result-link"
+                    disabled={
+                      pending === interaction.id ||
+                      agent.commands?.some(
+                        (command) =>
+                          command.interactionId === interaction.id &&
+                          [
+                            "pending",
+                            "delivered",
+                            "applied",
+                            "unknown",
+                          ].includes(command.status),
+                      )
+                    }
+                  >
+                    {agent.commands?.some(
+                      (command) =>
+                        command.interactionId === interaction.id &&
+                        ["pending", "delivered", "applied", "unknown"].includes(
+                          command.status,
+                        ),
+                    )
+                      ? "回答已记录，等待继续"
+                      : "提交回答并继续"}
+                  </button>
+                </form>
+              ))}
             {["failed", "cancelled"].includes(turn.status) && (
               <button
                 className="st-result-link"

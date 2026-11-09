@@ -1043,17 +1043,28 @@ export default function Editor({ project, onBack, onSave, onToast }) {
     if (!file) return;
     setUploadError("正在上传并处理素材…");
     try {
-      const asset = await uploadAsset(file);
+      const asset = await uploadAsset(
+        file,
+        projectRef.current.projectId || projectRef.current.id,
+      );
       const photo = designRef.current.nodes.find(
         (n) => n.id === selectedId && n.type === "image",
       );
-      if (photo) updateNode(photo.id, { src: asset.image, label: asset.title });
+      if (photo)
+        updateNode(photo.id, {
+          src: asset.image,
+          assetId: asset.id,
+          assetVersionId: asset.versionId,
+          label: asset.title,
+        });
       else {
         const node = {
           id: uid(),
           type: "image",
           label: asset.title,
           src: asset.image,
+          assetId: asset.id,
+          assetVersionId: asset.versionId,
           x: 40,
           y: 80,
           w: Math.min(W - 80, 500),

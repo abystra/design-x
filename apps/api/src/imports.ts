@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
+import { config } from '../../../packages/server-infra/src/config.js';
 import { tenantTransaction } from '../../../packages/server-infra/src/db.js';
 import { ensureBucket, putObject, deleteObject } from '../../../packages/server-infra/src/storage.js';
 import { createJob } from '../../../packages/server-domain/src/jobs.js';
@@ -24,7 +25,7 @@ export async function importRoutes(app:FastifyInstance){
     try{
       const result=await tenantTransaction(workspaceId,tx=>idempotent(tx,workspaceId,req.headers['idempotency-key'],{route:'project.import',sha256},async()=>{
         created=true;
-        return createJob(tx,workspaceId,'project.import',{sourceKey,sha256,targetProjectId:id(),title:packet.title||'导入项目',sourceBytes:bytes.length});
+        return createJob(tx,workspaceId,'project.import',{sourceKey,sourceBucket:config.s3Bucket,sha256,targetProjectId:id(),title:packet.title||'导入项目',sourceBytes:bytes.length});
       }));
       if(!created)await deleteObject(sourceKey).catch(()=>{});
       reply.code(202);return result;

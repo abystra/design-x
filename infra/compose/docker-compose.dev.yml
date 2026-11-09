@@ -15,7 +15,7 @@ services:
       retries: 30
   storage:
     image: chrislusf/seaweedfs:3.85
-    command: server -s3 -s3.config=/etc/seaweedfs/s3.json -dir=/data -ip=storage -volume.max=4
+    command: server -s3 -s3.config=/etc/seaweedfs/s3.json -dir=/data -ip=storage -volume.max=32
     ports: ["127.0.0.1:58333:8333"]
     volumes:
       - storage:/data

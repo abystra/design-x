@@ -15,6 +15,7 @@ import { mediaRoutes } from './media.js';
 import { documentRoutes } from './documents.js';
 import { taskRoutes } from './tasks.js';
 import { aiRoutes } from './ai.js';
+import { creativeRoutes } from './creative.js';
 export async function buildApp(options:{logger?:boolean,aiEnabled?:boolean}={}) {
  const app=Fastify({logger:options.logger??true,bodyLimit:6*1024*1024,trustProxy:false});
  await app.register(cookie);
@@ -41,6 +42,7 @@ export async function buildApp(options:{logger?:boolean,aiEnabled?:boolean}={}) 
   privateApi.addHook('preHandler',requireIdentity);
   await privateApi.register(importRoutes);await privateApi.register(projectRoutes);await privateApi.register(documentRoutes);await privateApi.register(libraryRoutes);await privateApi.register(mediaRoutes);await privateApi.register(taskRoutes);
   await privateApi.register(aiRoutes,{enabled:options.aiEnabled??config.aiEnabled});
+  await privateApi.register(creativeRoutes,{aiEnabled:options.aiEnabled??config.aiEnabled});
  });
  await startQueue();
  return app;

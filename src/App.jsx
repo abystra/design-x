@@ -50,6 +50,12 @@ import Catalog from "./components/Catalog.jsx";
 import Workbench from "./components/Workbench.jsx";
 import AIStudio from "./components/AIStudio.jsx";
 import { templates } from "./data/templates.js";
+import {
+  useCapabilities,
+  capabilityFor,
+  modeId,
+  modeLabel,
+} from "./lib/creative-capabilities";
 import catalog from "./data/catalog.json";
 import "./components/workbench.css";
 
@@ -196,12 +202,14 @@ function HomePage({
   toggleFavorite,
 }) {
   const [prompt, setPrompt] = useState("");
-  const [mode, setMode] = useState("智能创作");
+  const [mode, setMode] = useState("可编辑设计");
+  const capabilities = useCapabilities();
+  const capability = capabilityFor(capabilities.catalog, mode);
   const [tab, setTab] = useState("为你推荐");
   const [attachment, setAttachment] = useState(null);
   const [error, setError] = useState("");
   const upload = useRef();
-  const modes = ["智能创作", "图片生成", "视频生成"];
+  const modes = capabilities.catalog?.modes || [];
   const visible =
     tab === "最近使用"
       ? templates.filter((t) => projects.some((p) => p.image === t.image))
@@ -211,6 +219,10 @@ function HomePage({
   function submit() {
     if (!prompt.trim()) {
       setError("先写下你的设计想法，或试试下方的灵感建议");
+      return;
+    }
+    if (!capability?.enabled) {
+      setError(capability?.reason || "当前创作能力尚未配置");
       return;
     }
     setError("");
@@ -230,6 +242,8 @@ function HomePage({
       prompt,
       mode,
       image: attachment?.url,
+      assetId: attachment?.id,
+      assetVersionId: attachment?.versionId,
       category:
         mode === "视频生成"
           ? "视频"
@@ -247,7 +261,12 @@ function HomePage({
     setError("正在上传素材…");
     try {
       const asset = await uploadAsset(file);
-      setAttachment({ id: asset.id, name: asset.title, url: asset.image });
+      setAttachment({
+        id: asset.id,
+        versionId: asset.versionId,
+        name: asset.title,
+        url: asset.image,
+      });
       setError("");
     } catch (e) {
       setError(e.message);
@@ -281,7 +300,7 @@ function HomePage({
           <p>
             把灵感交给 AI，把时间留给创造。
             <br className="small-only" />
-            商品图、海报、视频，一站完成。
+            图片、海报与可编辑设计，一站完成。
           </p>
         </div>
         <div className="hero-collage" aria-hidden="true">
@@ -306,9 +325,11 @@ function HomePage({
         <div className="composer-tabs">
           {modes.map((m, i) => (
             <button
-              className={mode === m ? "active" : ""}
-              key={m}
-              onClick={() => setMode(m)}
+              className={modeId(mode) === m.id ? "active" : ""}
+              key={m.id}
+              disabled={!m.enabled}
+              title={m.reason || m.label}
+              onClick={() => setMode(modeLabel(m.id))}
             >
               {i === 0 ? (
                 <Sparkles size={15} />
@@ -317,7 +338,8 @@ function HomePage({
               ) : (
                 <Video size={15} />
               )}{" "}
-              {m}
+              {m.label || modeLabel(m.id)}
+              {!m.enabled ? " · 尚未开放" : ""}
             </button>
           ))}
           <span>DESIGN WITH AI</span>
@@ -358,6 +380,8 @@ function HomePage({
                 onTask({
                   draft: prompt,
                   image: attachment?.url,
+                  assetId: attachment?.id,
+                  assetVersionId: attachment?.versionId,
                   mode,
                   panel: "skills",
                 })
@@ -371,6 +395,8 @@ function HomePage({
                 onTask({
                   draft: prompt,
                   image: attachment?.url,
+                  assetId: attachment?.id,
+                  assetVersionId: attachment?.versionId,
                   mode,
                   panel: "assets",
                 })
@@ -384,6 +410,7 @@ function HomePage({
           <button
             className="send-button"
             onClick={submit}
+            disabled={!capability?.enabled}
             aria-label="开始创作"
           >
             <ArrowUp size={20} />
@@ -816,21 +843,40 @@ export default function App({
     try {
       const project = await api("/projects", {
         method: "POST",
-        body: { title: item.name || "新创作", blank: true },
+        body: item.template
+          ? {
+              title: item.template.title,
+              design: initialDesign(item.template),
+              image: item.template.image,
+            }
+          : { title: item.name || "新创作", blank: true },
       });
-      const skill = item.name
-        ? catalog.skills.find((s) => s.name === item.name) || item
-        : null;
+      if (item.assetId)
+        await api(`/projects/${project.id}/assets`, {
+          method: "POST",
+          body: {
+            assetId: item.assetId,
+            ...(item.assetVersionId ? { versionId: item.assetVersionId } : {}),
+          },
+        });
+      const skill =
+        item.recipeId || item.version
+          ? item
+          : item.name
+            ? catalog.skills.find((s) => s.name === item.name) || item
+            : null;
       await restoreStudio(
         project.id,
         {
           skill,
           draft: item.prompt || item.draft || "",
-          mode: item.mode === "智能创作" ? "Agent" : item.mode || "Agent",
+          mode: modeId(item.mode) === "design" ? "Agent" : item.mode,
           assets: item.image
             ? [
                 {
                   id: item.assetId || "reference",
+                  assetId: item.assetId,
+                  versionId: item.assetVersionId,
                   name: "参考素材",
                   url: item.image,
                 },
@@ -840,8 +886,9 @@ export default function App({
         },
         { project },
       );
+      setTemplate(null);
       history.pushState(null, "", "#studio/" + project.id);
-      await reloadProjects();
+      void reloadProjects().catch(() => {});
     } catch (e) {
       notify(e.message);
     }
@@ -912,15 +959,20 @@ export default function App({
     // subscribers, each of which may read several workspace resources.
     let workspaceEventTimer;
     const event = (message) => {
-      if (message?.type === 'job.updated') {
+      if (message?.type === "job.updated") {
         try {
           const payload = JSON.parse(message.data).payload;
-          if (payload?.kind === 'ai.turn') {
-            window.dispatchEvent(new CustomEvent('designx:ai-turn', { detail: payload }));
+          if (payload?.kind === "ai.turn") {
+            window.dispatchEvent(
+              new CustomEvent("designx:ai-turn", { detail: payload }),
+            );
             // Token/tool progress must not reload every design in a large project.
-            if (!['succeeded','failed','cancelled'].includes(payload.status)) return;
+            if (!["succeeded", "failed", "cancelled"].includes(payload.status))
+              return;
           }
-        } catch { /* Normal resource refresh handles non-protocol events. */ }
+        } catch {
+          /* Normal resource refresh handles non-protocol events. */
+        }
       }
       clearTimeout(workspaceEventTimer);
       workspaceEventTimer = setTimeout(refreshWorkspace, 180);
@@ -931,6 +983,14 @@ export default function App({
       "asset.ready",
       "project.updated",
       "document.committed",
+      "generation.updated",
+      "generation.completed",
+      "asset.updated",
+      "interaction.updated",
+      "interaction.command",
+      "activity.agent",
+      "activity.created",
+      "activity.updated",
     ].forEach((name) => events.addEventListener(name, event));
     return () => {
       active = false;
@@ -955,7 +1015,16 @@ export default function App({
         : await api("/projects/" + p.id, { method: "PATCH", body });
     const savedProject = { ...p, ...result, persisted: true };
     setEditedProject(savedProject);
-    await reloadProjects();
+    // The document mutation is already committed. Accept its revision before
+    // refreshing the project list; a read failure must never invite duplicate saves.
+    setEditing((current) =>
+      current &&
+      (current.documentId || current.id) ===
+        (savedProject.documentId || savedProject.id)
+        ? savedProject
+        : current,
+    );
+    void reloadProjects().catch(() => notify("设计已保存，项目列表暂时未刷新"));
     return savedProject;
   }
   async function favorite(id) {
@@ -1229,11 +1298,7 @@ export default function App({
                     toggleFavorite={favorite}
                   />
                 ) : page === "skills" || page === "tools" ? (
-                  <Catalog
-                    mode={page}
-                    onSelect={page === "skills" ? openStudio : setTask}
-                    onToast={notify}
-                  />
+                  <Catalog mode={page} onSelect={openStudio} onToast={notify} />
                 ) : ["projects", "assets", "recent"].includes(page) ? (
                   <Workspace
                     key={page}
@@ -1252,7 +1317,7 @@ export default function App({
                     onOpenProject={openProject}
                     onProjectsChanged={reloadProjects}
                     onToast={notify}
-                    onCreateProject={() => openStudio()}
+                    onCreateProject={openStudio}
                   />
                 ) : (
                   <Guide onNavigate={navigate} />
@@ -1296,7 +1361,10 @@ export default function App({
                 <dd>{template.subtitle}</dd>
               </div>
             </dl>
-            <button className="primary" onClick={() => edit(template)}>
+            <button
+              className="primary"
+              onClick={() => openStudio({ template })}
+            >
               使用这个模板 <ArrowRight size={17} />
             </button>
             <button className="secondary" onClick={() => favorite(template.id)}>
@@ -1365,9 +1433,7 @@ export default function App({
                   key={t.id}
                   onClick={() => {
                     setSearchOpen(false);
-                    catalog.skills.some((s) => s.id === t.id)
-                      ? openStudio(t)
-                      : setTask(t);
+                    openStudio(t);
                   }}
                 >
                   <Sparkles size={18} />

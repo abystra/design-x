@@ -6,6 +6,7 @@ import pg from "pg";
 import sharp from "sharp";
 import { setTimeout as delay } from "node:timers/promises";
 import type { AiRuntime } from "../../worker/src/ai-turn.js";
+import { disposeTestDatabase } from './helpers/database.js';
 
 // Real isolated PG/S3, with an explicitly injected local sandbox adapter: no paid calls.
 const adminUrl =
@@ -27,8 +28,9 @@ const { buildApp } = await import("../src/server.js");
 const { runBusinessJob } = await import("../../worker/src/process.js");
 const { runAiTurn, reconcileAiAttempts } =
   await import("../../worker/src/ai-turn.js");
-const { putObject, deleteObject } =
+const { deleteObject } =
   await import("../../../packages/server-infra/src/storage.js");
+const {ingestBufferAsset,linkProjectAsset}=await import('../../../packages/server-domain/src/assets.js');
 await migrate();
 const app = await buildApp({ logger: false, aiEnabled: true });
 const actors: any[] = [];
@@ -173,8 +175,7 @@ test.after(async () => {
   await stopQueue();
   for (const key of keys) await deleteObject(key).catch(() => {});
   await pool.end();
-  await admin.query(`DROP DATABASE "${databaseName}" WITH (FORCE)`);
-  await admin.end();
+  await disposeTestDatabase(admin, databaseName);
 });
 
 test("turn submission is durable, idempotent, tenant isolated and uses a bounded non-repeating AI queue", async () => {
@@ -667,17 +668,12 @@ test("authorized private image bytes reach the adapter and unrelated tenant reso
     [own, 0],
     [foreign, 1],
   ] as const) {
-    const key = `${actors[actor].workspace.id}/ai-fixture/${assetId}.png`;
-    keys.push(key);
-    await putObject(key, bytes, "image/png");
-    await tenantTransaction(actors[actor].workspace.id, (tx) =>
-      tx.query(
-        "INSERT INTO assets(id,workspace_id,title,mime,bytes,width,height,object_key,status) VALUES($1,$2,'reference','image/png',$3,64,48,$4,'ready')",
-        [assetId, actors[actor].workspace.id, bytes.length, key],
-      ),
-    );
+    await ingestBufferAsset(actors[actor].workspace.id,{assetId,bytes,mime:'image/png',title:'reference',source:{kind:'fixture'},attemptId:randomUUID()});
+    const stored=(await pool.query('SELECT object_key,thumbnail_key FROM assets WHERE id=$1',[assetId])).rows[0];keys.push(stored.object_key,stored.thumbnail_key);
   }
-  assert.equal((await start(p.id, { assetIds: [foreign] })).statusCode, 400);
+  assert.equal((await start(p.id, { assetIds: [foreign] })).statusCode, 403);
+  assert.equal((await start(p.id, { assetIds: [own] })).statusCode, 403,'same-tenant assets also require an explicit project association');
+  await tenantTransaction(actors[0].workspace.id,tx=>linkProjectAsset(tx,actors[0].workspace.id,p.id,own));
   const id = (await start(p.id, { assetIds: [own] })).json().id;
   let seen = false;
   await execute(
@@ -693,7 +689,7 @@ test("authorized private image bytes reach the adapter and unrelated tenant reso
         y: 120,
         w: 300,
         h: 200,
-        src: `/api/assets/${own}/file`,
+        src: input.context.assets[0].src,
       });
       return manifest;
     }),

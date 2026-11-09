@@ -1,8 +1,12 @@
 # Design-X 系统架构方案（实施版）
 
-版本：v1.1-draft · 更新：2026-10-31 · 状态：**用户已确认分阶段实施与 Codex/E2B 路线，其余提议仍按各决策状态验证**
+版本：v2 实施基线 · 更新：2026-11-08 · 状态：**用户已确认分阶段实施与 Codex/E2B 路线，其余提议仍按各决策状态验证**
 
-## 当前实施顺序与新增决策（2026-10-31）
+## v2 入口
+
+最新用户批准边界、实现协议与迁移方案见 [Part 15 · Design X v2](15-design-x-v2.md)，新宿主选择见 [ADR-0002](../adr/0002-design-x-v2-runtime-storage-generation.md)，实际测试与环境限制见 [v2 验收](../implementation/v2-verification.md)。以下 2026-10-31 内容为上一版历史状态。
+
+## 上一版实施顺序与新增决策（2026-10-31）
 
 已沿用高仿真原型落实个人空间、项目、素材、Board/Artboard、文档保存、异步处理与导出。用户随后授权接入 tldraw 与真实 AI；当前默认 Board 引擎为 tldraw 5.6.0，Agent 入口按服务端 `AI_ENABLED` 开关开放。
 
@@ -29,6 +33,10 @@
 | 10 | [10-roadmap-and-plan.md](10-roadmap-and-plan.md) | J. 路线图、Backlog、团队与排期、迁移步骤、决策日志、风险、待决问题 |
 | 11 | [11-sources.md](11-sources.md) | 引用来源与核验状态 |
 | 12 | [12-tldraw-adoption-review.md](12-tldraw-adoption-review.md) | AI 创作画布产品研究、tldraw 复评、现有 Board 接入差异与验收阶段 |
+| 13 | [13-creative-ai-platform.md](13-creative-ai-platform.md) | 创作型 AI 平台架构（提议）：生成网关、生成谱系、恢复与计费语义、Agent Runtime 与 MCP 工具面、技术选型总表、演进路线 |
+| 14 | [14-open-source-landscape.md](14-open-source-landscape.md) | 开源 AI 创作平台调研：ComfyUI、InvokeAI、SwarmUI、comfyui-deploy、Jaaz、Toonflow、ArcReel、OpenMontage 等的架构、共性模式、反模式与许可证 |
+
+新增：[15-design-x-v2.md](15-design-x-v2.md) — 独立控制面、WorkX 执行组件、真实图片与 Recipe、恢复和发布协议。
 
 建议阅读顺序：决策者读 1 → 10；前端读 1 → 4 → 7 → 3；后端和 AI 读 1 → 5 → 7 → 6 → 3；基础设施读 6 → 2 → 9。
 

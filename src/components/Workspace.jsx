@@ -205,7 +205,7 @@ export default function Workspace({ mode = 'projects', projects = [], onOpenProj
     if (added) { setAssetTab('素材'); onToast?.(`已上传 ${added} 张图片${rejected ? `，${rejected} 张未上传` : ''}`); }
     else if (rejected) onToast?.('上传未完成，请检查文件格式、10 MB 大小限制及网络状态');
   }
-  const openAsset = item => { setDialog(null); onOpenProject?.({ id: `asset-design-${Date.now()}`, title: `${item.title} · 设计`, image: item.image, assetId: item.assetId || (item.id.startsWith('stock-') ? undefined : item.id), persisted: false, type: '设计作品', updatedAt: new Date().toISOString() }); };
+  const openAsset = async item => { setDialog(null); await onCreateProject?.({ name: `${item.title} · 设计`, draft: item.prompt || '', image: item.image, assetVersionId: item.versionId, assetId: item.assetId || (item.id.startsWith('stock-') ? undefined : item.id), panel: 'assets' }); };
   const title = isAssets ? '每一份灵感，都值得收藏' : isRecent ? '接着上次的灵感，继续创作' : '让好想法，有自己的位置';
   return <div className="ws-page" aria-busy={loading || busy}>
     {importOpen && <ProjectImport onClose={() => setImportOpen(false)} onImported={async id => { await onProjectsChanged?.(); const project = await api(`/projects/${id}`); await onOpenProject?.(project); }} />}

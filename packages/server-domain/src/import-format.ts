@@ -15,7 +15,7 @@ export const IMPORT_LIMITS = {
   totalPixels: 100_000_000,
   outputBytes: 64 * 1024 * 1024,
 };
-export const portableAssetPattern = /^(?:\/api\/assets\/[a-zA-Z0-9-]+\/(?:file|thumbnail)|\/assets\/(?:coffee|skincare|interior|fashion|headphones|nature)\.jpg)$/;
+export const portableAssetPattern = /^(?:\/api\/assets\/[a-zA-Z0-9-]+(?:\/versions\/[a-zA-Z0-9-]+)?\/(?:file|thumbnail)|\/assets\/(?:coffee|skincare|interior|fashion|headphones|nature)\.jpg)$/;
 const assetFields = new Set(['src', 'image', 'url', 'thumbnail', 'logo', 'logoUrl']);
 const humanFields = new Set(['text', 'prompt', 'draft', 'title', 'name', 'description', 'subtitle', 'label']);
 const rootSchema = z.object({
@@ -48,7 +48,14 @@ export function collectAssetSources(value: unknown): string[] {
       } else if(assetFields.has(key)&&node) invalidImport('导入只允许包内素材，不允许外部网址或内联图片引用');
       if(!humanFields.has(key)&&/url\s*\(|@import|javascript:/i.test(node)) invalidImport('项目样式包含外部资源引用');
     } else if(Array.isArray(node)) node.forEach(value=>walk(value,key));
-    else if(node&&typeof node==='object') for(const [childKey,value] of Object.entries(node)) walk(value,childKey);
+    else if(node&&typeof node==='object') {
+      if(node.kind==='image'){
+        const image=`/api/assets/${node.assetId}/versions/${node.assetVersionId}/file`;
+        if(!portableAssetPattern.test(image))invalidImport('图片条目缺少有效的素材版本');
+        sources.add(image);
+      }
+      for(const [childKey,value] of Object.entries(node))walk(value,childKey);
+    }
   };
   walk(value);return [...sources];
 }
@@ -80,7 +87,7 @@ export function parsePortableProject(bytes: Buffer): PortableProject {
   if(nodes>IMPORT_LIMITS.nodes)invalidImport('项目图层总数不能超过 10000');
   if(boards.length){
     const validated=BoardSchema.safeParse(boards[0].content);if(!validated.success)invalidImport(`工作区数据无效：${validated.error.issues[0]?.message}`);
-    if(validated.data.results.some(result=>!artboards.some(doc=>doc.id===result.id)))invalidImport('工作区引用了不存在的画板');
+    if(validated.data.results.some(result=>result.kind!=='image'&&!artboards.some(doc=>doc.id===result.id)))invalidImport('工作区引用了不存在的画板');
     boards[0].content=validated.data;
   }
   const entries=Object.entries(packet.assets);if(entries.length>IMPORT_LIMITS.assets)invalidImport('项目素材不能超过 200 张');

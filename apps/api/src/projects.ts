@@ -1,3 +1,4 @@
+import { cancelGeneration } from '../../../packages/server-domain/src/generations.js';
 import { recordOps } from '../../../packages/server-domain/src/document-ops.js';
 import { BoardPositionSchema } from '../../../packages/doc-core/src/board.js';
 import { idempotent } from '../../../packages/server-domain/src/idempotency.js';
@@ -20,7 +21,10 @@ export async function projectRoutes(app:FastifyInstance) {
  app.get('/api/projects/:id',async(req:any)=>tenantTransaction(req.identity.workspace.id,async tx=>projectDto(await (projectView.parse(req.query?.view)==='metadata'?getProjectMetadata:getProject)(tx,params(req).id))));
  app.patch('/api/projects/:id',async(req:any)=>tenantTransaction(req.identity.workspace.id,tx=>patchProject(tx,req.identity.workspace.id,params(req).id,req.body||{})));
  app.delete('/api/projects/:id',async(req:any)=>tenantTransaction(req.identity.workspace.id,async tx=>{
-  await getProject(tx,params(req).id);await tx.query('UPDATE projects SET deleted_at=now() WHERE id=$1',[params(req).id]);
+  await getProject(tx,params(req).id,false,true);
+  const generations=(await tx.query("SELECT id FROM creative_requests WHERE project_id=$1 AND execution_status IN ('queued','running','unknown')",[params(req).id])).rows;
+  for(const g of generations)await cancelGeneration(tx,req.identity.workspace.id,g.id);
+  await tx.query('UPDATE projects SET deleted_at=now() WHERE id=$1',[params(req).id]);
   const cancelled=(await tx.query("UPDATE jobs SET status='cancelled',updated_at=now() WHERE project_id=$1 AND status IN ('queued','running') RETURNING *",[params(req).id])).rows;
   for(const job of cancelled)await emit(tx,req.identity.workspace.id,'job.updated',jobDto(job));
   await emit(tx,req.identity.workspace.id,'project.deleted',{projectId:params(req).id});return {ok:true};
