@@ -1,21 +1,27 @@
 # Part 13 · 创作型 AI 平台架构设计方案
 
 - 日期：2026-11-08（v2：合并开源调研结论）
-- 状态：**提议（Proposed）**。其中修订 ADR-0001 的部分（§6.3）需用户确认后另立 ADR
+- 状态：**已批准的 v2 实施边界见 [统一 v2 设计](15-design-x-v2.md) 与 [ADR-0002](../adr/0002-design-x-v2-runtime-storage-generation.md)**。本篇保留平台演进研究，超出 v2 的内容仍为后续提议。
 - 关系：补充 [Part 5](05-backend-and-ai.md) 和 [Part 7](07-data-and-interfaces.md)；在 [ADR-0001](../adr/0001-codex-e2b.md) 基础上细化 Agent 层
 - 参考：Design X 现有代码（`apps/harness`、`packages/ai-runtime`、`apps/worker`）、WorkX Codex Harness，以及 [Part 14 开源调研](14-open-source-landscape.md)（ComfyUI、InvokeAI、SwarmUI、comfyui-deploy、Jaaz、Toonflow、ArcReel、OpenMontage、infinite-canvas、JarvisHub）。正文中"〔参考：X〕"标出借鉴来源
 - 标注约定同 [README](README.md#标注约定)：[已核验] / [二手] / [假设] / [待定]
 
-## 0. 摘要
+## v2 实施修订（2026-11-08）
+
+当前采用独立 TypeScript 控制面、OpenAI Image API、R2、E2B 内 Python Runner/Codex app-server 0.166.0 和 Go matfs。WorkX 固定来源为 f81c31a3b09d13d8955248ec7bdefbdfc1f08a6e；源项目测试与目标重新验收分开记录。
+
+本期只有图片、参考编辑、三个可执行 Recipe 与可编辑设计，不含视频、外部 MCP、会员支付或位图分解。原生动态工具通过 root journal 调用受限共享应用服务。Image API 为同步调用，没有可轮询供应商 job ID；受理未知不自动重发，24 小时释放用户预占，成本保留未知。图片资产与 Artboard 分型，文字和品牌通过确定性排版保持独立图层。详细数据模型、迁移、实现及故障规则以 Part 15 为准。
+
+## 0. 历史研究摘要（以下演进项不代表本期全部实现）
 
 Design X 的目标是从"AI 可编辑设计"扩展成类似即梦的创作型 AI 平台：生图、改图、生视频、画布编排、资产沉淀，再加 Agent 协作。本方案的核心判断如下：
 
 1. **地基是"生成"，不是"Agent"。** 创作平台的大部分请求是"提示词 + 参数 + 参考图 → 生成"，不需要 Agent。要先建**生成网关**和**一等生成记录（`generations`）**，Agent 只是调用它们的上层客户端之一。
 2. **每一次生成都是可重放、可派生的记录。** 再次生成、做同款、变体、局部重绘、高清、扩图、图生视频，本质上都是在**生成谱系图**上派生新节点。这张图在画布上可以直接看到，借鉴 infinite-canvas 的"配置节点 → 结果节点 + 连线"。
 3. **三个可替换接缝**：模型供应商（`GenerationAdapter`）、Agent 宿主（`AgentRuntime`）、执行沙箱（`SandboxProvider`）。产品数据只放在 Design X 控制面，任何一个接缝换实现都不动地基。
-4. **业务工具统一用 MCP 暴露。** 同一套工具既服务平台托管的 Agent（Codex app-server），也服务用户自带的 Agent（本机 Codex 或 Claude Code 通过远程 MCP 接入）。
+4. **后续可探索 MCP；v2 使用受限原生工具桥。** 同一套工具既服务平台托管的 Agent（Codex app-server），也服务用户自带的 Agent（本机 Codex 或 Claude Code 通过远程 MCP 接入）。
 5. **合规、成本、地域是一等约束。** 审核、AI 标识、计量账本、部署地域在第一条生成链路里就要做，不留到上线前补。**沙箱和模型的部署地域是当前最大的返工风险，要最先验证。**
-6. **恢复和计费语义要先定死。** 供应商任务 ID 先落库再轮询；孤儿任务不自动重新提交；结果未知时冻结结算；编辑是分叉而不是覆盖。这些规则在 ArcReel、Toonflow、ComfyUI 等项目里都是踩过坑之后才定下的（见 Part 14），Design X 应该在写第一行生成代码前就采用。
+6. **恢复和计费语义要先定死。** 异步供应商才保存任务 ID 并轮询；本期 OpenAI Image API 保存调用意图和响应；孤儿请求不自动重新提交；结果未知时冻结结算；编辑是分叉而不是覆盖。这些规则在 ArcReel、Toonflow、ComfyUI 等项目里都是踩过坑之后才定下的（见 Part 14），Design X 应该在写第一行生成代码前就采用。
 
 ## 1. 背景与目标
 

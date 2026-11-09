@@ -1,16 +1,4 @@
-import { config as loadEnv } from "dotenv";
-import { fileURLToPath } from "node:url";
-
-const production = process.env.NODE_ENV === "production";
-// Process environment wins. Local AI overrides are read before .env, whose
-// template deliberately contains AI_ENABLED=false and empty credential values.
-if (!production)
-  loadEnv({
-    path: ["../../../.env.ai.local", "../../../.env"].map((path) =>
-      fileURLToPath(new URL(path, import.meta.url)),
-    ),
-    quiet: true,
-  });
+import { production } from './env.js';
 function value(key: string, fallback: string) {
   const result = process.env[key];
   if (!result && production)
@@ -29,8 +17,17 @@ export const config = {
   s3Endpoint: value("S3_ENDPOINT", "http://127.0.0.1:58333"),
   s3Region: process.env.S3_REGION || "us-east-1",
   s3Bucket: value("S3_BUCKET", "designx"),
+  s3StagingBucket: process.env.S3_STAGING_BUCKET || `${process.env.S3_BUCKET || "designx"}-staging`,
+  storageDirectUploadsEnabled: process.env.STORAGE_DIRECT_UPLOADS_ENABLED !== "false",
   s3AccessKey: value("S3_ACCESS_KEY_ID", "designx-local"),
   s3SecretKey: value("S3_SECRET_ACCESS_KEY", "designx-local-only"),
   maxUploadBytes: 10 * 1024 * 1024,
   aiEnabled: process.env.AI_ENABLED === "true",
+  imageEnabled: process.env.IMAGE_GENERATION_ENABLED === "true" || (!production && process.env.IMAGE_GENERATION_ENABLED !== "false" && !!process.env.OPENAI_API_KEY),
+  openaiApiKey: process.env.OPENAI_API_KEY || "",
+  imageModel: "gpt-image-2.5-sunburst-2026-09-08",
+  imageQuality: "medium" as const,
+  generationQuota: Math.max(1, Number(process.env.GENERATION_QUOTA) || 100),
+  imageTimeoutMs: Math.max(1000, Math.min(900000, Number(process.env.IMAGE_TIMEOUT_MS) || 300000)),
+  generationUnknownHoldHours: 24,
 };

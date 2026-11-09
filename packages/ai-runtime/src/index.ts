@@ -4,6 +4,8 @@ import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { runtimeConfig, repositoryRoot, safeRuntimeError } from "./config.js";
 import { validateManifest, type CreativeManifest } from "./manifest.js";
+import type { RuntimeSession, RunnerCommand, RunnerEvent, RunnerTool, MaterialMount } from './protocol.js';
+export { runAppServerTurn, pauseSandbox } from './app-server.js';
 
 export type RuntimeProgress = {
   stage: string;
@@ -19,6 +21,13 @@ export interface SandboxTurnInput {
   signal?: AbortSignal;
   onProgress?: (event: RuntimeProgress) => Promise<void> | void;
   onSandbox?: (sandboxId: string) => Promise<void>;
+  session?: RuntimeSession;
+  materialMount?: MaterialMount;
+  tools?: RunnerTool[];
+  pendingCommands?: () => Promise<RunnerCommand[]>;
+  onRuntimeEvent?: (event: RunnerEvent) => Promise<void>;
+  onTool?: (event: Record<string, unknown>) => Promise<{ success: boolean; result: unknown }>;
+  ownsRuntime?: () => Promise<boolean>;
 }
 let bundled:
   Promise<{ harness: string; validator: string; models: string }> | undefined;
@@ -56,7 +65,7 @@ export async function killSandbox(sandboxId: string) {
     throw new Error("Invalid sandbox identity");
   const apiKey = process.env.E2B_API_KEY;
   if (!apiKey) throw new Error("E2B 清理凭证尚未配置");
-  await Sandbox.kill(sandboxId, { apiKey });
+  await Sandbox.kill(sandboxId, { apiKey, requestTimeoutMs: 10000 });
 }
 
 export async function findSandboxesForExecution(

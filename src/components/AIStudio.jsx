@@ -51,6 +51,22 @@ import {
   rebaseAiBoardHistory,
 } from "../lib/ai-board-merge";
 import AgentTurns from "./AgentTurns";
+import ProjectActivity, { GenerationTurns } from "./ProjectActivity";
+import RecipeFields from "./RecipeFields";
+import {
+  useCapabilities,
+  capabilityFor,
+  modeId,
+  modeLabel,
+  imageSize,
+  normalizeAsset,
+  recipeFor,
+} from "../lib/creative-capabilities";
+import {
+  useCreativeActivity,
+  generationPlacementKey,
+  generationPrompt,
+} from "../lib/useCreativeActivity";
 import {
   boardItems,
   boardItemSize,
@@ -193,6 +209,9 @@ export default function AIStudio({
   const snap = session.snapshot || {};
   const projectId = session.projectId || session.id;
   const agent = useAiTurns(projectId);
+  const capabilities = useCapabilities();
+  const creative = useCreativeActivity(projectId);
+  const acceptedGenerations = useRef(new Set());
   const acceptedTurns = useRef(new Set());
   const receiving = useRef(false);
   const receiveTimer = useRef();
@@ -232,6 +251,19 @@ export default function AIStudio({
   );
   const [skill, setSkill] = useState(snap.skill || session.skill || null);
   const [mode, setMode] = useState(snap.mode || session.mode || "Agent");
+  const capability = capabilityFor(capabilities.catalog, mode);
+  const maxReferences =
+    capability?.maxReferences ??
+    capabilities.catalog?.image?.maxReferences ??
+    0;
+  const maxCount =
+    capability?.maxCount ?? capabilities.catalog?.image?.maxCount ?? 1;
+  const recipe = recipeFor(capabilities.catalog, skill);
+  const canSubmit = recipe ? recipe.enabled : capability?.enabled;
+  const [recipeParameters, setRecipeParameters] = useState(
+    snap.recipeParameters || {},
+  );
+  const [overwrite, setOverwrite] = useState(false);
   const [assets, setAssets] = useState(
     snap.assets?.length ? snap.assets : session.assets || snap.assets || [],
   );
@@ -242,6 +274,21 @@ export default function AIStudio({
   );
   const [ratio, setRatio] = useState(snap.ratio || "自动");
   const [count, setCount] = useState(snap.count || "自动");
+  const recipeCount =
+    recipe?.id === "multi-size"
+      ? (recipeParameters.sizes || "600x800,800x800,960x540")
+          .split(/[,，]/)
+          .filter(Boolean).length
+      : (recipe?.outputCount ?? 1);
+  let estimatedCount;
+  try {
+    estimatedCount = recipe
+      ? recipeCount
+      : resolveAiCount(count, draft, maxCount);
+  } catch {
+    estimatedCount = null;
+  }
+
   const [panel, setPanel] = useState(
     session.panel === undefined ? "skills" : session.panel,
   );
@@ -250,6 +297,7 @@ export default function AIStudio({
   const [assetTab, setAssetTab] = useState("示例素材");
   const [recentSkills, setRecentSkills] = useState([]);
   const [serverAssets, setServerAssets] = useState([]);
+  const [projectAssets, setProjectAssets] = useState([]);
   const [references, setReferences] = useState([]);
   const [popover, setPopover] = useState(null);
   const [selected, setSelected] = useState(snap.selected || null);
@@ -295,38 +343,53 @@ export default function AIStudio({
   const selectedSection = sections.find((r) => r.id === selected);
   const selectedItem = selectedNote || selectedSection;
   const referenceResult = results.find((r) => r.id === reference);
+  const executableRecipes = (capabilities.catalog?.recipes || []).map(
+    (item) => ({
+      ...item,
+      recipeId: item.id,
+      category:
+        item.id === "product-set"
+          ? "电商"
+          : item.id === "multi-size"
+            ? "品牌"
+            : "海报",
+    }),
+  );
+  const availablePresets = catalog.skills.filter(
+    (item) =>
+      item.category !== "视频" &&
+      !executableRecipes.some((recipe) => recipe.name === item.name),
+  );
   const skillList = useMemo(() => {
     const list =
       category === "最近使用"
         ? recentSkills
             .map(
               (id) =>
-                catalog.skills.find((s) => s.id === id) ||
-                SAMPLES.find((s) => s.name === id),
+                [...executableRecipes, ...availablePresets].find(
+                  (s) => s.id === id,
+                ) || SAMPLES.find((s) => s.name === id),
             )
             .filter(Boolean)
         : category === "推荐"
-          ? [
-              ...SAMPLES.map(
-                (s) => catalog.skills.find((c) => c.name === s.name) || s,
-              ),
-              ...catalog.skills
-                .filter((s) => !SAMPLES.some((x) => x.name === s.name))
-                .slice(0, 9),
-            ]
-          : catalog.skills.filter((s) => s.category === category);
+          ? [...executableRecipes, ...availablePresets.slice(0, 9)]
+          : [...executableRecipes, ...availablePresets].filter(
+              (s) => s.category === category,
+            );
     return list.filter((s) =>
       `${s.name}${s.description || ""}`.includes(query),
     );
-  }, [category, query, recentSkills]);
+  }, [category, query, recentSkills, capabilities.catalog]);
   const library =
-    assetTab === "本次文件"
-      ? assets
-      : assetTab === "我的资产"
-        ? serverAssets
-        : assetTab === "创作参考"
-          ? references
-          : STOCK;
+    assetTab === "项目素材"
+      ? projectAssets
+      : assetTab === "本次文件"
+        ? assets
+        : assetTab === "我的资产"
+          ? serverAssets
+          : assetTab === "创作参考"
+            ? references
+            : STOCK;
   const snapshot = useMemo(
     () => ({
       id: projectId,
@@ -337,6 +400,7 @@ export default function AIStudio({
       sections,
       draft,
       skill,
+      recipeParameters,
       mode,
       assets,
       attached,
@@ -356,6 +420,7 @@ export default function AIStudio({
       sections,
       draft,
       skill,
+      recipeParameters,
       mode,
       assets,
       attached,
@@ -384,6 +449,7 @@ export default function AIStudio({
     setEditingNote,
     openEditor,
     referenceDesign,
+    addGeneratedArtboard,
     saveDesign,
     finishGesture,
     canvasCommit: (next, before) => commitBoard(next, before),
@@ -500,7 +566,7 @@ export default function AIStudio({
       top: chat.current.scrollHeight,
       behavior: "smooth",
     });
-  }, [messages, agent.turns]);
+  }, [messages, agent.turns, creative.generations]);
   useEffect(() => {
     if (receiving.current) return;
     const completed = agent.turns.filter(
@@ -548,21 +614,49 @@ export default function AIStudio({
       });
   }, [agent.turns, receiveRetry]);
   useEffect(() => {
+    if (receiving.current) return;
+    const incoming = creative.generations.filter(
+      (item) =>
+        (item.outputs || []).some(
+          (output) => output.placementStatus === "board",
+        ) && !acceptedGenerations.current.has(generationPlacementKey(item)),
+    );
+    if (!incoming.length) return;
+    receiving.current = true;
+    receiveAiResults()
+      .then(() => {
+        incoming.forEach((item) =>
+          acceptedGenerations.current.add(generationPlacementKey(item)),
+        );
+      })
+      .catch((failure) => {
+        setError(failure.message);
+        if (!conflict.current)
+          receiveTimer.current = setTimeout(
+            () => retryReceive((value) => value + 1),
+            3000,
+          );
+      })
+      .finally(() => {
+        receiving.current = false;
+      });
+  }, [creative.generations, receiveRetry]);
+  useEffect(() => {
     let active = true;
     const load = async () => {
       try {
-        const [libraryAssets, referenceData, skills] = await Promise.all([
-          api("/assets"),
-          api("/preferences/references"),
-          api("/preferences/studio-skills"),
-        ]);
+        const [libraryAssets, linkedAssets, referenceData, skills] =
+          await Promise.all([
+            api("/assets"),
+            api(`/projects/${projectId}/assets`),
+            api("/preferences/references"),
+            api("/preferences/studio-skills"),
+          ]);
         if (!active) return;
-        const normalize = (a) => ({
-          ...a,
-          name: a.title || a.name,
-          url: a.image || a.url,
-          assetId: a.assetId || (a.status ? a.id : undefined),
-        });
+        const normalize = normalizeAsset;
+        setProjectAssets(
+          linkedAssets.filter((a) => a.status === "ready").map(normalize),
+        );
         setServerAssets(
           libraryAssets.filter((a) => a.status === "ready").map(normalize),
         );
@@ -876,6 +970,13 @@ export default function AIStudio({
     }
   }
   async function openEditor(result) {
+    if (result.kind === "image") {
+      setSelected(result.id);
+      setSelection([result.id]);
+      setPanel(null);
+      onToast?.("这是图片资产；加入画板后可添加独立的文字和品牌图层。");
+      return;
+    }
     await leave(() => onEdit?.(result));
   }
   function togglePanel(next) {
@@ -884,7 +985,14 @@ export default function AIStudio({
     setMobileView("canvas");
   }
   async function chooseSkill(s) {
-    setSkill(s);
+    const selectedRecipe = recipeFor(capabilities.catalog, s);
+    setSkill(
+      selectedRecipe
+        ? { ...s, ...selectedRecipe, recipeId: selectedRecipe.id }
+        : { ...s, kind: "preset" },
+    );
+    setRecipeParameters({});
+    if (selectedRecipe) setMode("Agent");
     setPopover(null);
     setError("");
     setDraft((v) => v.replace(/\/[\w\u4e00-\u9fa5]*$/, ""));
@@ -901,14 +1009,40 @@ export default function AIStudio({
     input.current?.focus();
     setMobileView("chat");
   }
-  function attachAsset(a) {
-    if (attached.some((x) => x.url === a.url)) return;
-    setAttached((v) => [...v, a].slice(-4));
-    setAssets((v) => (v.some((x) => x.url === a.url) ? v : [...v, a]));
-    setDraft((v) => v.replace(/@[^\s]*$/, ""));
-    setError("");
-    setMobileView("chat");
-    input.current?.focus();
+  async function linkAsset(asset) {
+    if (!asset.assetId) return;
+    await api(`/projects/${projectId}/assets`, {
+      method: "POST",
+      body: {
+        assetId: asset.assetId,
+        ...(asset.versionId ? { versionId: asset.versionId } : {}),
+      },
+    });
+    setProjectAssets((list) => [
+      asset,
+      ...list.filter((item) => item.assetId !== asset.assetId),
+    ]);
+  }
+  async function attachAsset(a) {
+    const asset = normalizeAsset(a);
+    if (attached.some((item) => item.url === asset.url)) return;
+    if (attached.length >= maxReferences) {
+      setError(`当前模式最多引用 ${maxReferences} 张图片`);
+      return;
+    }
+    try {
+      await linkAsset(asset);
+      setAttached((list) => [...list, asset]);
+      setAssets((list) =>
+        list.some((item) => item.url === asset.url) ? list : [...list, asset],
+      );
+      setDraft((value) => value.replace(/@[^\s]*$/, ""));
+      setError("");
+      setMobileView("chat");
+      input.current?.focus();
+    } catch (failure) {
+      setError(failure.message);
+    }
   }
   async function upload(e) {
     const files = [...e.target.files];
@@ -917,19 +1051,24 @@ export default function AIStudio({
     setUploading(true);
     setError("");
     try {
-      for (const file of files.slice(0, 4)) {
-        const uploaded = await uploadAsset(file);
+      if (files.length + attached.length > maxReferences)
+        throw new Error(
+          `当前模式最多引用 ${maxReferences} 张图片，请减少上传数量`,
+        );
+      for (const file of files) {
+        const uploaded = await uploadAsset(file, projectId);
         const asset = {
-          ...uploaded,
+          ...normalizeAsset(uploaded),
           id: uploaded.id,
           assetId: uploaded.id,
           name: uploaded.title || file.name,
-          url: uploaded.image,
+          url: normalizeAsset(uploaded).url,
         };
         setAssets((list) => [...list.filter((a) => a.id !== asset.id), asset]);
-        setAttached((list) =>
-          [...list.filter((a) => a.id !== asset.id), asset].slice(-4),
-        );
+        setAttached((list) => [
+          ...list.filter((a) => a.id !== asset.id),
+          asset,
+        ]);
         await addAssetBoard(asset);
       }
     } catch (failure) {
@@ -1034,6 +1173,7 @@ export default function AIStudio({
       setMessages(merged.messages || []);
       setDraft(merged.draft || "");
       setSkill(merged.skill || null);
+      setRecipeParameters(merged.recipeParameters || {});
       setMode(merged.mode || "Agent");
       setAssets(merged.assets || []);
       setAttached(merged.attached || []);
@@ -1080,28 +1220,35 @@ export default function AIStudio({
     onToast?.("修改方案已应用，原版本已保留");
   }
   async function generate() {
-    if (submitting.current || busy || uploading || conflicted || !draft.trim())
+    if (
+      submitting.current ||
+      busy ||
+      uploading ||
+      conflicted ||
+      (!draft.trim() && recipe?.id !== "multi-size")
+    )
       return;
-    if (!agent.enabled) {
+    if (!canSubmit) {
       setError(
-        "AI 创作尚未配置。需求已保留，你可以添加模板、素材或空白画板继续设计。",
+        recipe?.reason ||
+          capability?.reason ||
+          "当前创作能力尚未配置，需求已保留。",
       );
       return;
     }
-    if (mode !== "Agent") {
-      setError("当前支持 Agent 可编辑设计创作，图片与视频生成尚未开放。");
-      return;
-    }
-    const prompt = draft.trim();
+    const prompt =
+      draft.trim() || (recipe?.id === "multi-size" ? "多尺寸适配" : "");
     let amount;
     try {
-      amount = resolveAiCount(count, prompt);
+      amount = recipe
+        ? recipe.outputCount || (recipe.id === "product-set" ? 3 : 1)
+        : resolveAiCount(count, prompt, maxCount);
     } catch (failure) {
       setError(failure.message);
       return;
     }
-    if (attached.length > 3) {
-      setError("每次最多添加 3 张参考图片，请减少素材后重试。");
+    if (attached.length > maxReferences) {
+      setError(`每次最多添加 ${maxReferences} 张参考图片，请减少素材后重试。`);
       return;
     }
     submitting.current = true;
@@ -1122,35 +1269,91 @@ export default function AIStudio({
           new File([await response.blob()], `${source.name}.jpg`, {
             type: "image/jpeg",
           }),
+          projectId,
         );
         resolved.push({
           ...asset,
+          ...normalizeAsset(ready),
           id: ready.id,
           assetId: ready.id,
-          url: ready.image,
         });
       }
       if (resolved.some((item, index) => item !== attached[index])) {
         setAttached(resolved);
         latest.current = { ...latest.current, attached: resolved };
       }
+      for (const asset of resolved) await linkAsset(asset);
       await flush();
-      const target = referenceResult;
+      const target = referenceResult?.kind === "image" ? null : referenceResult;
       const document = target
         ? await api(`/documents/${target.documentId || target.id}`)
         : null;
-      await agent.start({
-        prompt,
-        count: amount,
-        ratio,
-        mode: target ? "revise" : "create",
-        baseBoardRevision: revision.current,
-        referenceDocumentIds: target ? [target.documentId || target.id] : [],
-        assetIds: resolved.map((asset) => asset.assetId),
-        ...(target
-          ? { targetDocumentId: document.id, baseRevision: document.revision }
-          : {}),
-      });
+      if (modeId(mode) === "image") {
+        await creative.start({
+          prompt,
+          count: amount,
+          size: imageSize(ratio),
+          quality: "medium",
+          referenceAssetIds: resolved.map((asset) => asset.assetId),
+          referenceAssetVersionIds: resolved.every((asset) => asset.versionId)
+            ? resolved.map((asset) => asset.versionId)
+            : [],
+          baseBoardRevision: revision.current,
+          placement: "board",
+        });
+      } else if (recipe) {
+        const parameters = {
+          ...recipeParameters,
+          prompt,
+          headline: recipeParameters.headline?.trim() || prompt.slice(0, 80),
+        };
+        if (recipe.id === "multi-size") {
+          parameters.documentId =
+            recipeParameters.documentId ||
+            target?.documentId ||
+            target?.id ||
+            (selectedResult?.kind !== "image"
+              ? selectedResult?.documentId || selectedResult?.id
+              : undefined);
+          if (!parameters.documentId)
+            throw new Error("请先选择需要适配的可编辑画板");
+          parameters.sizes = (
+            recipeParameters.sizes || "600x800,800x800,960x540"
+          )
+            .split(/[,，]/)
+            .map((value) => {
+              const [width, height] = value.trim().split(/[x×]/i).map(Number);
+              if (!Number.isFinite(width) || !Number.isFinite(height))
+                throw new Error("尺寸请填写为 600x800,800x800");
+              return { width, height };
+            });
+        }
+        if (resolved[0]) parameters.assetId = resolved[0].assetId;
+        await creative.recipe({
+          recipeId: recipe.id,
+          recipeVersion: recipe.version,
+          parameters,
+          referenceAssetIds: resolved.map((asset) => asset.assetId),
+          baseBoardRevision: revision.current,
+        });
+        await receiveAiResults();
+      } else {
+        await agent.start({
+          prompt:
+            skill?.kind === "preset"
+              ? `${prompt}\n提示词预设：${skill.name}。${skill.description || skill.prompt || ""}`
+              : prompt,
+          count: amount,
+          ratio,
+          mode: target && overwrite ? "revise" : "create",
+          baseBoardRevision: revision.current,
+          referenceDocumentIds: target ? [target.documentId || target.id] : [],
+          assetIds: resolved.map((asset) => asset.assetId),
+          ...(target && overwrite
+            ? { targetDocumentId: document.id, baseRevision: document.revision }
+            : {}),
+        });
+      }
       if (mounted.current) {
         setDraft((value) => (value.trim() === prompt ? "" : value));
         setPopover(null);
@@ -1163,6 +1366,14 @@ export default function AIStudio({
     }
   }
   function referenceDesign(r) {
+    if (r.kind === "image") {
+      referenceImage(r);
+      return;
+    }
+    setMode("Agent");
+    if (ratio.includes("x")) setRatio("自动");
+    setOverwrite(false);
+    setSkill(null);
     setSelected(r.id);
     setSelection([r.id]);
     setReference(r.id);
@@ -1170,7 +1381,64 @@ export default function AIStudio({
     setMobileView("chat");
     input.current?.focus();
   }
+  function referenceImage(output) {
+    setMode("图片生成");
+    setSkill(null);
+    setReference(null);
+    const asset = normalizeAsset({
+      ...output,
+      title: output.title || "生成图片",
+      status: "ready",
+    });
+    setAttached([asset]);
+    setAssets((list) => [
+      asset,
+      ...list.filter((item) => item.assetId !== asset.assetId),
+    ]);
+    setPanel(null);
+    setMobileView("chat");
+    input.current?.focus();
+  }
+  async function locateGeneration(generation, output) {
+    try {
+      await receiveAiResults();
+      const matching = latest.current.results.filter(
+        (result) =>
+          result.generationId === generation.id &&
+          (!output ||
+            result.assetId === output.assetId ||
+            result.assetVersionId === output.assetVersionId ||
+            output.documentIds?.includes(result.id)),
+      );
+      if (matching.length) {
+        fit(matching);
+        setSelected(matching[0].id);
+        setSelection(matching.map((item) => item.id));
+        setPanel(null);
+        setMobileView("canvas");
+      } else {
+        setPanel("assets");
+        setAssetTab("项目素材");
+        onToast?.("产物保存在素材库，当前画布没有对应节点。");
+      }
+    } catch (failure) {
+      setError(failure.message);
+    }
+  }
+  async function addGeneratedArtboard(output) {
+    return addAssetBoard(
+      normalizeAsset({
+        ...output,
+        status: "ready",
+        title: output.title || "生成图片",
+      }),
+    );
+  }
   async function saveDesign(result) {
+    if (result.kind === "image") {
+      onToast?.("图片资产已自动保存到项目素材库");
+      return;
+    }
     try {
       await flush();
       const saved = await onSave?.(result);
@@ -1447,6 +1715,12 @@ export default function AIStudio({
     ]);
   }
   async function addAssetBoard(asset) {
+    try {
+      await linkAsset(asset);
+    } catch (failure) {
+      setError(failure.message);
+      return [];
+    }
     const width = Math.max(1, Math.min(2000, asset.width || 800)),
       height = Math.max(
         1,
@@ -1465,6 +1739,7 @@ export default function AIStudio({
               type: "image",
               src: asset.url,
               assetId: asset.assetId,
+              assetVersionId: asset.versionId || asset.assetVersionId,
               label: asset.name,
               x: 0,
               y: 0,
@@ -1611,6 +1886,7 @@ export default function AIStudio({
       });
       setDraft(snapshot.draft || "");
       setSkill(snapshot.skill || null);
+      setRecipeParameters(snapshot.recipeParameters || {});
       setMode(snapshot.mode || "Agent");
       setAssets(snapshot.assets || []);
       setAttached(snapshot.attached || []);
@@ -1634,7 +1910,7 @@ export default function AIStudio({
   const panelTitle = {
     skills: "技能",
     files: "文件",
-    history: "创作记录",
+    history: "项目活动",
     assets: "资产库",
     templates: "模板灵感",
     help: "画布操作",
@@ -1690,13 +1966,15 @@ export default function AIStudio({
           </div>
         </div>
         <div className="st-conversation" ref={chat}>
-          {!messages.length && !agent.turns.length ? (
+          {!messages.length &&
+          !agent.turns.length &&
+          !creative.generations.length ? (
             <div className="st-greeting">
               <span className="st-greeting-symbol">✳</span>
               <h1>你好，让灵感发生。</h1>
               <p>从一个想法，开始一场自由创作</p>
               <div className="st-starters">
-                {SAMPLES.map((s) => (
+                {SAMPLES.filter((s) => s.category !== "视频").map((s) => (
                   <button
                     key={s.name}
                     onClick={() =>
@@ -1784,6 +2062,14 @@ export default function AIStudio({
                   )}
                 </article>
               ))}
+              <GenerationTurns
+                creative={creative}
+                recipes={capabilities.catalog?.recipes || []}
+                onReference={referenceImage}
+                onAdd={addGeneratedArtboard}
+                onLocate={locateGeneration}
+                onError={setError}
+              />
               <AgentTurns
                 agent={agent}
                 onLocate={locateAiTurn}
@@ -1798,7 +2084,20 @@ export default function AIStudio({
             <div className="st-reference">
               <img src={referenceResult.image} alt="" />
               <span>
-                修改此方案 · 先预览再应用<small>{referenceResult.title}</small>
+                {overwrite
+                  ? "修改原画板 · 先预览再应用"
+                  : "基于此画板生成新版本"}
+                <small>
+                  {referenceResult.title} · V{referenceResult.revision || 1}
+                </small>
+                <label className="st-overwrite-choice">
+                  <input
+                    type="checkbox"
+                    checked={overwrite}
+                    onChange={(event) => setOverwrite(event.target.checked)}
+                  />
+                  应用到原画板（需审核方案）
+                </label>
               </span>
               <IconButton
                 label="取消引用方案"
@@ -1825,7 +2124,8 @@ export default function AIStudio({
             {skill && (
               <div className="st-selected-skill">
                 <Sparkles size={12} />
-                {skill.name}
+                {skill.name} ·{" "}
+                {recipe ? `配方 v${recipe.version}` : "提示词预设"}
                 <button
                   aria-label="移除当前技能"
                   onClick={() => setSkill(null)}
@@ -1834,6 +2134,13 @@ export default function AIStudio({
                 </button>
               </div>
             )}
+            <RecipeFields
+              recipe={recipe}
+              recipeParameters={recipeParameters}
+              setRecipeParameters={setRecipeParameters}
+              results={results}
+              selectedResult={selectedResult}
+            />
             {attached.length > 0 && (
               <div className="st-attachments">
                 {attached.map((a) => (
@@ -1890,27 +2197,57 @@ export default function AIStudio({
             <div className="st-composer-options">
               <select
                 aria-label="生成比例"
-                value={ratio}
+                value={modeId(mode) === "image" ? imageSize(ratio) : ratio}
                 onChange={(e) => setRatio(e.target.value)}
               >
-                {["自动", "3:4", "1:1", "16:9", "9:16", "4:3"].map((v) => (
-                  <option key={v} value={v}>
-                    {v === "自动" ? "比例自动" : v}
+                {(modeId(mode) === "image"
+                  ? capabilities.catalog?.image?.sizes || [
+                      "1024x1024",
+                      "1024x1536",
+                      "1536x1024",
+                    ]
+                  : ["自动", "3:4", "1:1", "16:9", "9:16", "4:3"]
+                ).map((value) => (
+                  <option key={value} value={value}>
+                    {value === "自动"
+                      ? "比例自动"
+                      : value.includes("x")
+                        ? value.replace("x", " × ")
+                        : value}
                   </option>
                 ))}
               </select>
               <select
                 aria-label="方案数量"
-                value={count}
+                value={recipe ? String(recipeCount) : count}
+                disabled={!!recipe}
                 onChange={(e) => setCount(e.target.value)}
               >
                 <option value="自动">数量自动</option>
-                {[1, 2, 3].map((n) => (
-                  <option key={n} value={n}>
-                    {n} 个方案
-                  </option>
-                ))}
+                {Array.from({ length: maxCount }, (_, index) => index + 1).map(
+                  (n) => (
+                    <option key={n} value={n}>
+                      {n} 个方案
+                    </option>
+                  ),
+                )}
               </select>
+            </div>
+            <div className="st-quota-estimate" role="status">
+              <span>
+                {modeId(mode) === "image"
+                  ? estimatedCount
+                    ? `预计 ${estimatedCount * (capabilities.catalog?.image?.quotaPerImage || 1)} 配额`
+                    : "请确认生成数量"
+                  : recipe
+                    ? recipe.id === "multi-size"
+                      ? "尺寸适配不调用图片生成"
+                      : `预计 ${recipeCount * (capabilities.catalog?.image?.quotaPerImage || 1)} 配额 · 独立图层排版`
+                    : "续改默认保留原画板"}
+              </span>
+              {capabilities.catalog?.quota && (
+                <span>可用 {capabilities.catalog.quota.remaining}</span>
+              )}
             </div>
             <div className="st-composer-actions">
               <button className="st-add" onClick={() => file.current?.click()}>
@@ -1939,31 +2276,37 @@ export default function AIStudio({
                   setPopover((v) => (v === "mode" ? null : "mode"))
                 }
               >
-                {mode === "Agent" ? (
+                {modeId(mode) === "design" ? (
                   <Bot size={15} />
                 ) : mode === "图片生成" ? (
                   <Images size={15} />
                 ) : (
                   <Video size={15} />
                 )}
-                <span>{mode}</span>
+                <span>{modeLabel(mode)}</span>
                 <ChevronDown size={10} />
               </button>
               <button
                 className="st-send"
                 disabled={
-                  !draft.trim() ||
+                  (!draft.trim() && recipe?.id !== "multi-size") ||
                   busy ||
                   uploading ||
                   conflicted ||
-                  agent.submitting
+                  agent.submitting ||
+                  creative.submitting ||
+                  !canSubmit
                 }
                 onClick={generate}
                 aria-label="发送设计需求"
                 title={
-                  agent.enabled
-                    ? "开始创作可编辑设计"
-                    : "AI 尚未配置，需求会保留为草稿"
+                  canSubmit
+                    ? recipe
+                      ? `运行${recipe.name}`
+                      : modeId(mode) === "image"
+                        ? "开始生成图片"
+                        : "开始创作可编辑设计"
+                    : "当前能力尚未配置，需求会保留为草稿"
                 }
               >
                 <ArrowUp size={18} />
@@ -1971,27 +2314,42 @@ export default function AIStudio({
             </div>
             {popover === "mode" && (
               <div className="st-popover st-mode-popover">
-                {[
-                  ["Agent", Bot, "自动规划创作"],
-                  ["图片生成", Images, "图片与视觉方案"],
-                  ["视频生成", Video, "故事分镜预览"],
-                ].map(([m, I, t]) => (
-                  <button
-                    key={m}
-                    disabled={m !== "Agent"}
-                    onClick={() => {
-                      setMode(m);
-                      setPopover(null);
-                    }}
-                  >
-                    <I size={16} />
-                    <span>
-                      {m}
-                      <small>{m === "Agent" ? t : "尚未开放"}</small>
-                    </span>
-                    {mode === m && <Check size={14} />}
-                  </button>
-                ))}
+                {(capabilities.catalog?.modes || []).map((item) => {
+                  const Icon =
+                    item.id === "image"
+                      ? Images
+                      : item.id === "video"
+                        ? Video
+                        : Bot;
+                  return (
+                    <button
+                      key={item.id}
+                      disabled={!item.enabled}
+                      onClick={() => {
+                        setMode(
+                          item.id === "design" ? "Agent" : modeLabel(item.id),
+                        );
+                        if (item.id !== "design") setSkill(null);
+                        if (item.id === "design" && ratio.includes("x"))
+                          setRatio("自动");
+                        setPopover(null);
+                      }}
+                    >
+                      <Icon size={16} />
+                      <span>
+                        {item.label || modeLabel(item.id)}
+                        <small>
+                          {item.enabled
+                            ? item.id === "image"
+                              ? "生成独立图片资产"
+                              : "文字与品牌元素独立编辑"
+                            : item.reason || "尚未开放"}
+                        </small>
+                      </span>
+                      {modeId(mode) === item.id && <Check size={14} />}
+                    </button>
+                  );
+                })}
               </div>
             )}
             {popover === "skills" && (
@@ -2016,13 +2374,13 @@ export default function AIStudio({
                   </button>
                 </div>
                 <div>
-                  {catalog.skills
+                  {[...executableRecipes, ...availablePresets]
                     .filter((s) => !query || s.name.includes(query))
                     .slice(0, 10)
                     .map((s) => (
                       <button key={s.id} onClick={() => chooseSkill(s)}>
                         <Sparkles size={13} />
-                        {s.name}
+                        {s.name} · {s.recipeId ? "配方" : "预设"}
                         {skill?.name === s.name && <Check size={13} />}
                       </button>
                     ))}
@@ -2030,16 +2388,24 @@ export default function AIStudio({
               </div>
             )}
           </div>
-          {(error || agent.error || libraryError) && (
+          {(error ||
+            agent.error ||
+            libraryError ||
+            capabilities.error ||
+            creative.error) && (
             <p className="st-error" role="alert">
-              {error || agent.error || libraryError}
+              {error ||
+                agent.error ||
+                libraryError ||
+                capabilities.error ||
+                creative.error}
             </p>
           )}
           <div className="st-composer-footnote">
             <span>
-              {agent.enabled
-                ? "需求自动保存 · 生成可编辑方案"
-                : "需求自动保存 · AI 尚未配置"}
+              {canSubmit
+                ? `${attached.length}/${maxReferences} 张参考 · ${modeId(mode) === "image" ? "图片资产" : "可编辑设计"}`
+                : capability?.reason || "正在读取创作能力"}
             </span>
             <span>Shift ↵ 换行</span>
           </div>
@@ -2100,7 +2466,13 @@ export default function AIStudio({
             </button>
             <button
               className="st-export"
-              disabled={!selectedResult || busy || uploading || conflicted}
+              disabled={
+                !selectedResult ||
+                selectedResult.kind === "image" ||
+                busy ||
+                uploading ||
+                conflicted
+              }
               onClick={() => openEditor(selectedResult)}
             >
               <Download size={14} />
@@ -2209,7 +2581,13 @@ export default function AIStudio({
           >
             <header>
               <strong>
-                {selectedNote ? "便签" : selectedSection ? "分区" : "画板分区"}
+                {selectedNote
+                  ? "便签"
+                  : selectedSection
+                    ? "方案组"
+                    : selectedResult?.kind === "image"
+                      ? "图片资产"
+                      : "可编辑画板"}
               </strong>
               <small>
                 {selection.length > 1
@@ -2227,6 +2605,91 @@ export default function AIStudio({
                 <X size={13} />
               </IconButton>
             </header>
+            {selectedResult && (
+              <div className="st-result-inspector">
+                <p>{selectedResult.title}</p>
+                {selectedResult.kind === "image" ? (
+                  <>
+                    <small>图片资产 · 内容为位图</small>
+                    <button
+                      className="st-board-inline-action"
+                      onClick={() => referenceImage(selectedResult)}
+                    >
+                      <Images size={13} />
+                      参考图编辑
+                    </button>
+                    <button
+                      className="st-board-inline-action"
+                      onClick={() => addGeneratedArtboard(selectedResult)}
+                    >
+                      <Plus size={13} />
+                      加入可编辑画板
+                    </button>
+                    <a
+                      className="st-board-inline-action"
+                      href={selectedResult.image}
+                      download
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <Download size={13} />
+                      导出原图
+                    </a>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      className="st-board-inline-action"
+                      onClick={() => referenceDesign(selectedResult)}
+                    >
+                      <Sparkles size={13} />
+                      生成新版本
+                    </button>
+                    <button
+                      className="st-board-inline-action"
+                      onClick={() => openEditor(selectedResult)}
+                    >
+                      <Expand size={13} />
+                      精细编辑
+                    </button>
+                  </>
+                )}
+                {selectedResult.generationId && (
+                  <details className="st-result-lineage">
+                    <summary>查看来源与派生关系</summary>
+                    {(() => {
+                      const origin = creative.generations.find(
+                        (item) => item.id === selectedResult.generationId,
+                      );
+                      return (
+                        <>
+                          <p>{generationPrompt(origin) || "生成记录"}</p>
+                          <small>生成记录 {selectedResult.generationId}</small>
+                          <small>
+                            素材版本 {selectedResult.assetVersionId}
+                          </small>
+                          {(origin?.references || [])
+                            .map((reference) => reference.assetVersionId)
+                            .map((id) => (
+                              <small key={id}>参考版本 {id}</small>
+                            ))}
+                          <button
+                            disabled={!origin || creative.submitting}
+                            onClick={() =>
+                              creative
+                                .regenerate(origin)
+                                .catch((failure) => setError(failure.message))
+                            }
+                          >
+                            再次生成 · 新请求
+                          </button>
+                        </>
+                      );
+                    })()}
+                  </details>
+                )}
+              </div>
+            )}
             {selectedNote && (
               <label className="st-board-field st-board-text-field">
                 <span>内容</span>
@@ -2542,7 +3005,7 @@ export default function AIStudio({
             {panel === "skills" && (
               <>
                 <div className="st-panel-tabs">
-                  {CATEGORIES.map((c) => (
+                  {CATEGORIES.filter((c) => c !== "视频").map((c) => (
                     <button
                       key={c}
                       className={category === c ? "active" : ""}
@@ -2618,7 +3081,12 @@ export default function AIStudio({
                           </span>
                         </div>
                         <div className="st-skill-info">
-                          <strong>{s.name}</strong>
+                          <strong>
+                            {s.name}{" "}
+                            <small>
+                              {s.recipeId ? `配方 v${s.version}` : "提示词预设"}
+                            </small>
+                          </strong>
                           <p>{s.description || s.prompt}</p>
                         </div>
                       </button>
@@ -2644,7 +3112,7 @@ export default function AIStudio({
                     </div>
                   )}
                   <div className="st-panel-bottom">
-                    <span>65 种技能，让创作少一点门槛。</span>
+                    <span>配方执行明确流程，预设帮助表达创意。</span>
                     <Sparkles size={15} />
                   </div>
                 </div>
@@ -2672,17 +3140,21 @@ export default function AIStudio({
               <>
                 {panel === "assets" && (
                   <div className="st-panel-tabs">
-                    {["示例素材", "本次文件", "我的资产", "创作参考"].map(
-                      (t) => (
-                        <button
-                          key={t}
-                          className={assetTab === t ? "active" : ""}
-                          onClick={() => setAssetTab(t)}
-                        >
-                          {t}
-                        </button>
-                      ),
-                    )}
+                    {[
+                      "项目素材",
+                      "示例素材",
+                      "本次文件",
+                      "我的资产",
+                      "创作参考",
+                    ].map((t) => (
+                      <button
+                        key={t}
+                        className={assetTab === t ? "active" : ""}
+                        onClick={() => setAssetTab(t)}
+                      >
+                        {t}
+                      </button>
+                    ))}
                   </div>
                 )}
                 <div className="st-panel-scroll">
@@ -2711,6 +3183,23 @@ export default function AIStudio({
                             <Check size={13} />
                           )}
                         </button>
+                        {a.assetId && (
+                          <button
+                            className="st-library-add"
+                            onClick={() =>
+                              linkAsset(a)
+                                .then(() => onToast?.("已加入当前项目素材"))
+                                .catch((failure) => setError(failure.message))
+                            }
+                          >
+                            <FolderPlus size={12} />
+                            {projectAssets.some(
+                              (item) => item.assetId === a.assetId,
+                            )
+                              ? "已关联当前项目"
+                              : "加入当前项目"}
+                          </button>
+                        )}
                         <button
                           className="st-library-add"
                           disabled={busy || uploading || conflicted}
@@ -2735,38 +3224,17 @@ export default function AIStudio({
             )}
             {panel === "history" && (
               <div className="st-panel-scroll">
-                {messages.filter((m) => m.role === "user").length ? (
-                  <div className="st-history-list">
-                    {messages
-                      .filter((m) => m.role === "user")
-                      .map((m, i) => (
-                        <button
-                          key={m.id}
-                          onClick={() => {
-                            setDraft(m.text);
-                            setPanel(null);
-                            setMobileView("chat");
-                            input.current?.focus();
-                          }}
-                        >
-                          <span>{String(i + 1).padStart(2, "0")}</span>
-                          <div>
-                            <b>{m.text}</b>
-                            <small>
-                              {m.skill || "自由创作"} · 复用这次需求
-                            </small>
-                          </div>
-                          <ArrowUpRight size={15} />
-                        </button>
-                      ))}
-                  </div>
-                ) : (
-                  <div className="st-panel-empty">
-                    <MessageSquare size={34} />
-                    <h3>让第一段对话从这里开始</h3>
-                    <p>本次创作的每一步，都会留在这里</p>
-                  </div>
-                )}
+                <ProjectActivity
+                  creative={creative}
+                  agent={agent}
+                  onReuse={(prompt) => {
+                    setDraft(prompt);
+                    setPanel(null);
+                    setMobileView("chat");
+                    input.current?.focus();
+                  }}
+                  onLocate={locateAiTurn}
+                />
               </div>
             )}
           </section>

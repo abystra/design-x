@@ -26,7 +26,21 @@ import {
 export const DesignPreview = memo(
   function DesignPreview({ project }) {
     const design = project.design;
-    if (!design) return <img src={project.image} alt={project.title} />;
+    if (!design || project.kind === "image")
+      return (
+        <img
+          src={project.image}
+          alt={project.title}
+          style={{
+            display: "block",
+            width: "100%",
+            aspectRatio: design
+              ? `${design.width}/${design.height}`
+              : undefined,
+            objectFit: "contain",
+          }}
+        />
+      );
     return (
       <div
         className="st-design"
@@ -57,7 +71,8 @@ export const DesignPreview = memo(
   (before, after) =>
     before.project.design === after.project.design &&
     before.project.title === after.project.title &&
-    before.project.image === after.project.image,
+    before.project.image === after.project.image &&
+    before.project.kind === after.project.kind,
 );
 
 function IconButton({ label, children, ...props }) {
@@ -172,7 +187,11 @@ export const BoardItem = memo(function BoardItem({
         <span>
           {String(index + 1).padStart(2, "0")} / {item.label || item.title}
         </span>
-        <b>V{item.revision || item.version || 1}</b>
+        <b>
+          {item.kind === "image"
+            ? "图片"
+            : `V${item.revision || item.version || 1}`}
+        </b>
       </div>
       <button
         className="st-design-select"
@@ -183,7 +202,8 @@ export const BoardItem = memo(function BoardItem({
       </button>
       <div className="st-result-caption">
         <span>
-          {item.ratio || "画板"} · {item.design.width} × {item.design.height}
+          {item.kind === "image" ? "图片资产" : item.ratio || "可编辑画板"} ·{" "}
+          {item.design.width} × {item.design.height}
         </span>
         <IconButton
           label={`引用方案 ${index + 1}`}
@@ -196,14 +216,24 @@ export const BoardItem = memo(function BoardItem({
         <div className="st-result-actions">
           <button
             onClick={() => handlers.current.referenceDesign(item)}
-            title="AI 续改稍后开放，可先记录需求"
+            title={
+              item.kind === "image"
+                ? "以此图为参考生成新图片"
+                : "基于此画板创建新版本"
+            }
           >
             <WandSparkles size={13} />
-            继续修改
+            {item.kind === "image" ? "参考图编辑" : "生成新版本"}
           </button>
-          <button onClick={() => handlers.current.openEditor(item)}>
+          <button
+            onClick={() =>
+              item.kind === "image"
+                ? handlers.current.addGeneratedArtboard(item)
+                : handlers.current.openEditor(item)
+            }
+          >
             <Expand size={13} />
-            精细编辑
+            {item.kind === "image" ? "加入画板" : "精细编辑"}
           </button>
           <IconButton
             label={`保存方案 ${index + 1}`}

@@ -1,0 +1,9 @@
+[
+  {
+    "AllowedOrigins": ["http://127.0.0.1:5173"],
+    "AllowedMethods": ["PUT", "HEAD"],
+    "AllowedHeaders": ["content-type", "content-length", "x-amz-*"],
+    "ExposeHeaders": ["ETag"],
+    "MaxAgeSeconds": 300
+  }
+]

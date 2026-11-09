@@ -11,6 +11,7 @@ import {
 } from "../../../packages/server-domain/src/ai-turns.js";
 import { getProjectMetadata } from "../../../packages/server-domain/src/projects.js";
 import { HttpError } from "../../../packages/server-domain/src/common.js";
+import { ensureCreativeSession,readCreativeSession,submitAgentCommand } from "../../../packages/server-domain/src/creative-sessions.js";
 function key(req: any) {
   const value = req.headers["idempotency-key"];
   if (typeof value !== "string" || !value.trim())
@@ -25,6 +26,8 @@ export async function aiRoutes(
   app: FastifyInstance,
   options: { enabled: boolean },
 ) {
+  app.get('/api/projects/:id/agent-session',async(req:any)=>tenantTransaction(req.identity.workspace.id,async tx=>{await ensureCreativeSession(tx,req.identity.workspace.id,req.params.id);return readCreativeSession(tx,req.params.id);}));
+  app.post('/api/ai-turns/:id/commands',async(req:any)=>tenantTransaction(req.identity.workspace.id,tx=>submitAgentCommand(tx,req.identity.workspace.id,req.params.id,req.body)));
   app.post(
     "/api/projects/:id/ai-turns",
     { config: { rateLimit: { max: 12, timeWindow: "1 minute" } } },

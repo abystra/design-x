@@ -43,6 +43,9 @@ export async function acceptAiMutation(mutate, onAccepted, refresh) {
 export function useAiTurns(projectId) {
   const [enabled, setEnabled] = useState(false);
   const [turns, setTurns] = useState([]);
+  const [session, setSession] = useState(null);
+  const [interactions, setInteractions] = useState([]);
+  const [commands, setCommands] = useState([]);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const active = useRef(true);
@@ -60,12 +63,21 @@ export function useAiTurns(projectId) {
       currentProject.current === projectId &&
       sequence === refreshSequence.current;
     try {
-      const next = await api(`/projects/${projectId}/ai-turns`);
+      const [next, context] = await Promise.allSettled([
+        api(`/projects/${projectId}/ai-turns`),
+        api(`/projects/${projectId}/agent-session`),
+      ]);
+      if (next.status === "rejected") throw next.reason;
       if (current()) {
-        setTurns([...next].reverse());
-        setError("");
+        setTurns([...next.value].reverse());
+        if (context.status === "fulfilled") {
+          setSession(context.value.session);
+          setInteractions(context.value.interactions || []);
+          setCommands(context.value.commands || []);
+        }
+        setError(context.status === "rejected" ? context.reason.message : "");
       }
-      return next;
+      return next.value;
     } catch (failure) {
       if (current()) setError(failure.message);
       throw failure;
@@ -75,6 +87,9 @@ export function useAiTurns(projectId) {
   useEffect(() => {
     active.current = true;
     setTurns([]);
+    setSession(null);
+    setInteractions([]);
+    setCommands([]);
     setError("");
     setEnabled(false);
     setSubmitting(pending.current.has(projectId));
@@ -196,7 +211,35 @@ export function useAiTurns(projectId) {
         ),
       refreshInBackground,
     );
-  const cancel = (turn) => changeJob(turn, "cancel");
+  const command = (turn, type, payload = {}) => {
+    const signature = `command:${projectId}:${turn.id}:${type}:${JSON.stringify(payload)}`;
+    return acceptAiMutation(
+      () =>
+        api(`/ai-turns/${turn.id}/commands`, {
+          method: "POST",
+          body: { commandId: requestKey(signature), type, ...payload },
+        }),
+      (response) => {
+        requestKeys.current.delete(signature);
+        if (isCurrent()) {
+          ++refreshSequence.current;
+          setCommands((previous) => [
+            {
+              ...response,
+              turnId: turn.id,
+              interactionId: payload.interactionId,
+              type,
+            },
+            ...previous.filter((item) => item.id !== response.id),
+          ]);
+        }
+      },
+      refreshInBackground,
+    );
+  };
+  const cancel = (turn) => command(turn, "stop");
+  const answer = (turn, interaction, answers) =>
+    command(turn, "answer", { interactionId: interaction.id, answers });
   const retry = (turn) => changeJob(turn, "retry");
   const details = (turn) => api(`/ai-turns/${turn.id}`);
   const apply = (turn, proposalId, baseRevision) => {
@@ -219,6 +262,10 @@ export function useAiTurns(projectId) {
   return {
     enabled,
     turns,
+    session,
+    interactions,
+    commands,
+    answer,
     error,
     submitting,
     start,

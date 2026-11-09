@@ -1,3 +1,5 @@
+> 2026-11-09 v2 更新：本机默认存储和 Runner 已切换到 R2 与新版 E2B，数据保护及切换证据见 [v2-cutover.md](v2-cutover.md)。最新交付和真实服务验收见 [v2-verification.md](v2-verification.md)，统一设计见 [Part 15](../architecture/15-design-x-v2.md)。下面保留各阶段历史记录。
+
 # 非 AI 实施记录
 
 范围：保留高仿真 UI，实现无模型密钥即可运行的前后端创作链路。AI 架构按用户决定改为 E2B 内 Harness + Codex SDK；本阶段未运行任何模型或沙箱任务。

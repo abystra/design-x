@@ -53,9 +53,7 @@ pnpm typecheck
 pnpm check
 pnpm test:unit
 pnpm build
-# 真实 PostgreSQL + S3；测试会启动自己的 worker/renderer。
-# 推荐 DATABASE_URL 指向独立测试库，避免消费开发环境（包括 AI）的任务。
-# 若复用开发库，应先停止长期 worker/renderer，且没有待执行的 AI 任务。
+# 本地 PostgreSQL + S3；测试自动创建临时库和桶，并启动自己的 worker/renderer。
 pnpm test:api
 # 重新启动 pnpm dev:all 后运行浏览器旅程。
 python3 -m pip install -r tests/e2e/requirements.txt
@@ -68,6 +66,10 @@ pnpm test:import
 pnpm verify:ai-runtime
 python3 tests/e2e/ai_creation.py --allow-paid-ai
 ```
+
+`test:unit` 和 `test:api` 不读取开发者的 `.env` / `.env.ai.local`，并替换继承的云存储、E2B 和模型凭据。API 每轮使用唯一数据库及素材、暂存、旧存储测试桶，结束只清理本轮资源，不使用现有项目或其存储桶。默认连接本机 PostgreSQL `55432`，并从已有的 `chrislusf/seaweedfs:3.85` 镜像启动临时 S3 容器，使用随机 loopback 端口、独立容器数据并在结束时移除；不会构建或拉取镜像。unit 不需要 Docker。
+
+可通过 `TEST_DATABASE_URL` 调整本地 PostgreSQL，数据库用户需可创建数据库。显式设置 `TEST_S3_ENDPOINT` 时使用指定本地 S3 服务，不启动容器；另支持 `TEST_S3_REGION`、`TEST_S3_ACCESS_KEY_ID`、`TEST_S3_SECRET_ACCESS_KEY`。只接受本地地址；可选 `TEST_S3_BUCKET` / `TEST_S3_STAGING_BUCKET` 必须是尚不存在的桶名。单文件回归使用 `pnpm test:api --file v2-storage.integration.test.ts`；显式 `verify:*` 真实服务验收不受此隔离影响。
 
 `pnpm check` 包含页面结构检查以及保留的原型规则/会话测试夹具；这些夹具不参与产品执行，也不能代替真实服务验收。完整浏览器步骤、实际结果与限制见 [验收指南](docs/implementation/verification.md)、[执行记录](docs/implementation/verification-results.md)、[阶段进度](docs/implementation/progress.md)。
 

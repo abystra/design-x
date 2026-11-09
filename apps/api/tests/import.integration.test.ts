@@ -6,6 +6,7 @@ import {spawn,type ChildProcess} from 'node:child_process';
 import {setTimeout as sleep} from 'node:timers/promises';
 import pg from 'pg';
 import sharp from 'sharp';
+import { disposeTestDatabase } from './helpers/database.js';
 
 // An isolated real database makes the test safe while the local development workers keep running.
 const adminUrl=process.env.DATABASE_URL||'postgres://designx:designx-local-only@127.0.0.1:55432/designx';
@@ -57,7 +58,7 @@ test.after(async()=>{
   const jobs=(await pool.query('SELECT payload,result FROM jobs')).rows;
   const keys=new Set<string>([...assets.flatMap(row=>[row.object_key,row.thumbnail_key]),...jobs.flatMap(row=>[row.payload.sourceKey,...(row.payload.importStaging||[]),row.result?.objectKey])].filter(Boolean));
   for(const key of keys)await deleteObject(key).catch(()=>{});
- }finally{await pool.end();await admin.query(`DROP DATABASE "${dbName}" WITH (FORCE)`);await admin.end();}
+ }finally{await pool.end();await disposeTestDatabase(admin,dbName);}
 });
 
 test('invalid JSON, versions, references, duplicate IDs and resource limits reject before project creation',async()=>{
@@ -153,6 +154,21 @@ test('schemaVersion 1 packages without primary ID or authored Board objects rema
  const state=(await request('GET',`/api/projects/${completed.result.projectId}/studio`)).json().snapshot;assert.deepEqual(state.notes,[]);assert.deepEqual(state.sections,[]);
 });
 
+test('v2 image Board items import with independent immutable versions and export again',async()=>{
+ const packet=structuredClone(fixture) as any;
+ const source='/api/assets/source-private-two/versions/source-version/file';
+ packet.assets[source]=packet.assets[boardImage];
+ packet.documents[2].content.results.push({id:'source-image-item',kind:'image',assetId:'source-private-two',assetVersionId:'source-version',title:'图片资产',position:{x:700,y:100}});
+ const accepted=await upload(packet);assert.equal(accepted.statusCode,202,accepted.body);
+ const completed=await waitJob(accepted.json().id);assert.equal(completed.status,'succeeded',JSON.stringify(completed));
+ const state=(await request('GET',`/api/projects/${completed.result.projectId}/studio`)).json().snapshot;
+ const image=state.results.find((item:any)=>item.kind==='image');assert.ok(image);assert.notEqual(image.id,'source-image-item');assert.notEqual(image.assetVersionId,'source-version');
+ assert.equal((await request('GET',`/api/assets/${image.assetId}/versions/${image.assetVersionId}/file`)).statusCode,200);
+ const exported=await request('POST',`/api/projects/${completed.result.projectId}/exports`,{format:'dxproj'});assert.equal(exported.statusCode,202,exported.body);
+ const result=await waitJob(exported.json().id);assert.equal(result.status,'succeeded',JSON.stringify(result));
+ const download=(await request('GET',result.downloadUrl)).json();assert.ok(download.assets[`/api/assets/${image.assetId}/versions/${image.assetVersionId}/file`]);
+});
+
 test('bad image decoding never creates a partial project or asset library entry',async()=>{
  const packet=structuredClone(fixture);packet.assets[oldImage]='data:image/png;base64,'+Buffer.from('not an image').toString('base64');
  const beforeProjects=(await request('GET','/api/projects')).json().length,beforeAssets=(await request('GET','/api/assets')).json().length;
@@ -185,7 +201,8 @@ test('records select their exact original or thumbnail bytes when an old asset I
  const snapshot=(await request('GET',`/api/projects/${completed.result.projectId}/studio`)).json().snapshot;
  const [original,preview]=snapshot.attached;
  assert.notEqual(original.id,preview.id);assert.equal(original.assetId,original.id);assert.equal(preview.asset_id,preview.id);
- assert.equal(original.url,`/api/assets/${original.id}/file`);assert.equal(preview.url,`/api/assets/${preview.id}/file`);
+ const originalVersion=(await request('GET',`/api/assets/${original.id}/versions`)).json()[0],previewVersion=(await request('GET',`/api/assets/${preview.id}/versions`)).json()[0];
+ assert.equal(original.url,originalVersion.image);assert.equal(preview.url,previewVersion.image);
  assert.equal((await sharp((await request('GET',original.url)).rawPayload).metadata()).width,80);
  assert.equal((await sharp((await request('GET',preview.url)).rawPayload).metadata()).width,40);
 });

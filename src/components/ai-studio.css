@@ -14,3 +14,189 @@
 @media(max-width:700px){.st-organize-tools{top:58px;right:12px;padding:3px;gap:0}.st-organize-tools .st-icon{width:27px;height:27px}.st-save-banner{top:98px;left:10px;right:10px;flex-direction:column;align-items:flex-start;font-size:10px;padding:9px 11px}.st-library-item>button:first-child>div{height:165px}.st-template-grid img{height:155px}.st-canvas-tools{max-width:58%;overflow-x:auto}.st-canvas-tools .st-icon{flex-shrink:0}.st-canvas-count{display:none}}
 
 .st-render-status{position:absolute;right:18px;bottom:70px;z-index:3;padding:6px 9px;background:#ffffffed;border:1px solid #e6e9df;border-radius:7px;color:#8a977c;font-size:10px;pointer-events:none}
+
+
+/* Extend the existing warm studio palette for real generation and activity. */
+.st-recipe-fields {
+  margin: 8px 0;
+  padding: 10px;
+  border: 1px solid #e8e4dd;
+  border-radius: 10px;
+  background: #faf9f6;
+}
+.st-recipe-fields legend {
+  padding: 0 5px;
+  font-size: 11px;
+  color: #747269;
+}
+.st-recipe-fields label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+  font-size: 11px;
+}
+.st-recipe-fields label > span {
+  width: 50px;
+  flex-shrink: 0;
+}
+.st-recipe-fields input,
+.st-recipe-fields select {
+  min-width: 0;
+  flex: 1;
+  padding: 5px 7px;
+  border: 1px solid #e5e1da;
+  border-radius: 5px;
+  font: inherit;
+  background: white;
+}
+.st-quota-estimate {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 2px 0 9px;
+  color: #79766f;
+  font-size: 10px;
+}
+.st-overwrite-choice {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding-top: 5px;
+  font-size: 10px;
+}
+.st-overwrite-choice input {
+  width: auto;
+}
+.st-generation-outputs {
+  display: grid;
+  gap: 10px;
+  margin: 10px 0;
+}
+.st-generation-outputs > div {
+  overflow: hidden;
+  border: 1px solid #e8e4dd;
+  border-radius: 9px;
+  background: #fff;
+}
+.st-generation-image {
+  width: 100%;
+  padding: 0;
+  text-align: left;
+  background: transparent;
+}
+.st-generation-image img {
+  display: block;
+  width: 100%;
+  max-height: 250px;
+  object-fit: contain;
+  background: #f2f0eb;
+}
+.st-generation-image span {
+  display: block;
+  padding: 7px 9px;
+  color: #727067;
+  font-size: 10px;
+}
+.st-generation-outputs > div > div {
+  display: flex;
+  gap: 6px;
+  padding: 0 8px 8px;
+}
+.st-generation-outputs > div > div button {
+  flex: 1;
+  padding: 6px;
+  border-radius: 5px;
+  font-size: 11px;
+  background: #f5f3ed;
+}
+.st-generation-outputs small {
+  display: block;
+  padding: 0 8px 8px;
+  color: #79766f;
+  font-size: 10px;
+}
+.st-project-activity {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+.st-project-activity article {
+  padding: 12px;
+  background: #faf9f6;
+  border: 1px solid #e9e5dd;
+  border-radius: 10px;
+}
+.st-project-activity article > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.st-project-activity b {
+  font-size: 12px;
+}
+.st-project-activity p {
+  margin: 9px 0;
+  font-size: 12px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.st-project-activity small {
+  color: #868177;
+  font-size: 10px;
+}
+.st-project-activity button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 10px;
+  font-size: 11px;
+  color: #ad5d42;
+  background: transparent;
+}
+.st-result-inspector p {
+  margin: 10px 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.st-result-inspector > small {
+  display: block;
+  color: #888278;
+  font-size: 10px;
+  margin-bottom: 10px;
+}
+.st-result-lineage {
+  border-top: 1px solid #e8e4dd;
+  margin-top: 12px;
+  padding-top: 10px;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.st-result-lineage summary {
+  cursor: pointer;
+}
+.st-result-lineage small {
+  display: block;
+  color: #8a8479;
+  font-size: 9px;
+  margin: 5px 0;
+}
+.st-result-lineage button {
+  margin-top: 8px;
+  padding: 5px;
+  background: #f3f0e8;
+}
+.st-skill-info strong small {
+  font-size: 9px;
+  font-weight: 400;
+  color: #898375;
+}
+@media (max-width: 700px) {
+  .st-recipe-fields {
+    max-height: 160px;
+    overflow-y: auto;
+  }
+  .st-project-activity {
+    padding: 10px;
+  }
+}

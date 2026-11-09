@@ -1,5 +1,8 @@
 # ADR-0001：E2B Sandbox 内 Harness 使用 Codex SDK
 
+> 2026-11-08：新回合的宿主决策由 [ADR-0002](0002-design-x-v2-runtime-storage-generation.md) 替代，使用固定 app-server 0.166.0 与提取 Runner。本文的 SDK 路线及 2026-10-31 验收是历史基线，保留旧回合兼容；不能作为 v2 目标组合的验收证据。
+
+
 - 日期：2026-10-31
 - 状态：**Accepted（用户明确决策）；真实运行与首个产品创作链路已实施**
 - 替代：原 AD-08/D-08 自研轻量 Agent loop、原 D-09 拒绝 E2B/Codex 的结论

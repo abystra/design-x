@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 const artifactDir = 'tests/ai/.artifacts';
 await mkdir(artifactDir, { recursive: true });
 const redact = (s: string) => [process.env.E2B_API_KEY,process.env.DEEPSEEK_API_KEY]
-  .filter(Boolean).reduce((v,k) => v.split(k!).join('[REDACTED]'),s)
+  .filter((k): k is string => Boolean(k)).reduce((v,k) => v.split(k).join('[REDACTED]'),s)
   .replace(/(?:sk-|e2b_)[A-Za-z0-9_-]+/g, '[REDACTED]');
 let sandbox: Sandbox | undefined;
 const events: object[] = [];

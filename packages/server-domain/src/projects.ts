@@ -54,7 +54,15 @@ async function hydrateStudio(tx:Tx,projectId:string,board:any) {
  const memberIds=(board.content.results||[]).map((result:any)=>result.id);
  const docs=(await tx.query("SELECT id,project_id,title,content,revision FROM documents WHERE project_id=$1 AND kind='artboard' AND id=ANY($2::text[])",[projectId,memberIds])).rows;
  const byId=new Map(docs.map(d=>[d.id,d]));
- const results=(board.content.results||[]).filter((r:any)=>byId.has(r.id)).map((r:any)=>({...r,...artboardDto(byId.get(r.id),r.position)}));
+ const results=[];
+ for(const r of board.content.results||[]){
+  if(r.kind==='image'){
+   const v=(await tx.query("SELECT v.*,a.title FROM asset_versions v JOIN assets a ON a.id=v.asset_id JOIN project_assets pa ON pa.asset_id=a.id WHERE v.id=$1 AND v.asset_id=$2 AND pa.project_id=$3 AND pa.revoked_at IS NULL AND a.deleted_at IS NULL",[r.assetVersionId,r.assetId,projectId])).rows[0];
+   if(!v)continue;
+   const image=`/api/assets/${v.asset_id}/versions/${v.id}/file`;
+   results.push({...r,image,thumbnail:`/api/assets/${v.asset_id}/versions/${v.id}/thumbnail`,persisted:true,design:{width:v.width,height:v.height,background:'#ffffff',nodes:[{id:'image',type:'image',src:image,x:0,y:0,w:v.width,h:v.height,fit:'contain'}]}});
+  } else if(byId.has(r.id))results.push({...r,...artboardDto(byId.get(r.id),r.position)});
+ }
  return {snapshot:{...board.content,results},revision:board.revision};
 }
 export async function saveStudio(tx:Tx,workspaceId:string,projectId:string,input:any,acknowledgeOnly=false) {
@@ -70,6 +78,11 @@ export async function saveStudio(tx:Tx,workspaceId:string,projectId:string,input
  const members=(await tx.query('SELECT id,project_id,kind FROM documents WHERE id=ANY($1::text[])',[memberIds])).rows;
  const byId=new Map(members.map(member=>[member.id,member]));
  for(const result of snapshot.results){
+  if(result.kind==='image'){
+   const existingImage=(board.content.results||[]).find((r:any)=>r.id===result.id&&r.kind==='image');
+   if(!existingImage||existingImage.assetId!==result.assetId||existingImage.assetVersionId!==result.assetVersionId)throw new HttpError(400,'INVALID_IMAGE_NODE','图片节点只能由受控素材放置产生');
+   continue;
+  }
   const existing=byId.get(result.id);
   if(existing){if(existing.project_id!==projectId||existing.kind!=='artboard')notFound();continue;}
   throw new HttpError(400,'UNKNOWN_ARTBOARD','请先创建画板，再加入工作区');

@@ -16,6 +16,9 @@ import {
 } from "./common.js";
 import { recordOps } from "./document-ops.js";
 
+import { MAX_REFERENCES } from './capabilities.js';
+import { ensureCreativeSession,sessionContext,attachTurnToSession } from './creative-sessions.js';
+import { freezeProjectMaterials,authorizeFrozenMaterials } from './project-materials.js';
 const identifier = z.string().regex(/^[a-zA-Z0-9_-]{1,150}$/);
 export const TurnInput = z
   .object({
@@ -24,7 +27,7 @@ export const TurnInput = z
     mode: z.enum(["create", "revise"]).default("create"),
     ratio: z.enum(["自动", "1:1", "3:4", "16:9", "9:16", "4:3"]).optional(),
     referenceDocumentIds: z.array(identifier).max(6).default([]),
-    assetIds: z.array(identifier).max(12).default([]),
+    assetIds: z.array(identifier).max(MAX_REFERENCES).default([]),
     targetDocumentId: identifier.optional(),
     baseRevision: z.number().int().positive().optional(),
     baseBoardRevision: z.number().int().positive().optional(),
@@ -134,28 +137,16 @@ export async function startTurn(
       "DOC_REVISION_CONFLICT",
       "目标画板版本已变化，请重新载入",
     );
-  const assetIds = new Set(input.assetIds);
-  for (const doc of docs)
-    for (const node of doc.content.nodes || []) {
-      const match = node.src?.match(assetUrlPattern);
-      if (match) assetIds.add(match[1]);
-    }
-  if (assetIds.size > 30)
-    throw new HttpError(
-      413,
-      "AI_CONTEXT_TOO_LARGE",
-      "参考素材过多，请减少所选画板",
-    );
-  const assets = (
-    await tx.query(
-      "SELECT id,title,mime,width,height FROM assets WHERE id=ANY($1::text[]) AND deleted_at IS NULL AND status='ready'",
-      [[...assetIds]],
-    )
-  ).rows;
-  if (assets.length !== assetIds.size)
-    throw new HttpError(400, "INVALID_ASSET", "参考素材不可用或不属于此空间");
+  const session=await ensureCreativeSession(tx,workspaceId,projectId);
+  if (session.active_attempt_id && (await tx.query("SELECT 1 FROM ai_attempts WHERE id=$1 AND status<>'closed'", [session.active_attempt_id])).rowCount)
+    throw new HttpError(409, 'SESSION_BUSY', '前一轮创作正在收尾或等待核对，请稍后再提交；本次尚未创建任务');
+  const history=await sessionContext(tx,session.id);
+  const materialManifest=await freezeProjectMaterials(tx,projectId);
+  const assets=(await tx.query(`SELECT a.id,a.title,v.id AS "assetVersionId",v.mime,v.width,v.height,v.sha256,v.bytes FROM project_assets p JOIN assets a ON a.id=p.asset_id JOIN asset_versions v ON v.id=COALESCE(p.version_id,a.current_version_id) WHERE p.project_id=$1 AND p.revoked_at IS NULL AND a.deleted_at IS NULL AND a.status='ready' ORDER BY a.created_at LIMIT 500`,[projectId])).rows;
+  if(input.assetIds.some(assetId=>!assets.some(a=>a.id===assetId)))throw new HttpError(403,'ASSET_NOT_LINKED','参考素材必须先关联当前项目');
   const context = {
     project: { id: projectId, title: project.title },
+    sessionId:session.id, history, materialManifest,
     referenceArtboards: docs.map((d) => ({
       id: d.id,
       title: d.title,
@@ -164,8 +155,8 @@ export async function startTurn(
     })),
     assets: assets.map((a) => ({
       ...a,
-      src: `/api/assets/${a.id}/file`,
-      thumbnail: `/api/assets/${a.id}/thumbnail`,
+      src: `/api/assets/${a.id}/versions/${a.assetVersionId}/file`,
+      thumbnail: `/api/assets/${a.id}/versions/${a.assetVersionId}/thumbnail`,
     })),
     builtinSources,
     count: input.count,
@@ -191,6 +182,7 @@ export async function startTurn(
       JSON.stringify(context),
     ],
   );
+  await attachTurnToSession(tx,workspaceId,projectId,job.id,input.prompt);
   return { ...job, turn: turnDto(await readTurn(tx, job.id)) };
 }
 
@@ -297,6 +289,7 @@ export async function commitTurn(
     ).rowCount
   )
     throw new HttpError(409, "AI_TURN_EXPIRED", "创作执行已过期，成果未提交");
+  if(turn.context.materialManifest)await authorizeFrozenMaterials(tx,turn.context.materialManifest);
   const manifest = validateManifest(rawManifest, turn);
   const proposals = manifest.artboards.map((a, index) => ({
     id: `${job.id}-p${index + 1}`,

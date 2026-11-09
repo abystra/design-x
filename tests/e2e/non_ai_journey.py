@@ -69,6 +69,25 @@ def main() -> int:
             page.get_by_role('button', name='保存', exact=True).click()
             expect(page.locator('.ed-save-state')).to_have_text('已保存', timeout=20000)
 
+        def open_primary_editor():
+            # Templates and restored projects now enter their durable Studio.
+            # Pick the real Artboard before opening its fine-grained editor.
+            page.get_by_label('当前创作名称', exact=True).wait_for()
+            close = page.get_by_role('button', name='关闭侧边面板', exact=True)
+            if close.count():
+                close.click()
+            page.get_by_role('button', name=re.compile('^选中方案 1 ')).click()
+            page.get_by_role('button', name='编辑与导出', exact=True).click()
+            page.get_by_label('作品名称', exact=True).wait_for()
+
+        def leave_studio():
+            page.get_by_label('当前创作名称', exact=True).wait_for()
+            close = page.get_by_role('button', name='关闭侧边面板', exact=True)
+            if close.count():
+                close.click()
+            page.locator('.st-back').click()
+            page.get_by_role('navigation', name='主导航').wait_for()
+
         def register(target, address, name):
             target.goto(args.base_url)
             target.wait_for_load_state('networkidle')
@@ -98,10 +117,15 @@ def main() -> int:
             nav('模板灵感')
             page.get_by_role('button', name=re.compile('^预览模板 ')).first.click()
             page.get_by_role('button', name='使用这个模板').click()
-            page.get_by_label('作品名称', exact=True).wait_for()
-            project_id = page.url.split('#editor/')[-1]
+            page.get_by_label('当前创作名称', exact=True).wait_for()
+            page.wait_for_url(re.compile(r'#studio/[^/]+$'))
+            project_id = page.url.split('#studio/')[-1]
             assert project_id and '/' not in project_id, page.url
             title = f'E2E 咖啡海报 {run_id}'
+            page.get_by_label('当前创作名称', exact=True).fill(title)
+            page.keyboard.press('Meta+s' if sys.platform == 'darwin' else 'Control+s')
+            expect(page.locator('.st-board-actions [role=status]')).to_have_text('已保存到工作空间', timeout=20000)
+            open_primary_editor()
             page.get_by_label('作品名称', exact=True).fill(title)
             text_node = page.get_by_role('button', name=re.compile('^选中文字：')).first
             text_node.press('Enter')
@@ -112,6 +136,7 @@ def main() -> int:
             assert any(n.get('text') == '真实保存 · 秋日上新' for n in stored['design']['nodes'])
             page.evaluate('localStorage.clear()')
             page.reload(wait_until='domcontentloaded')
+            open_primary_editor()
             expect(page.get_by_label('作品名称', exact=True)).to_have_value(title)
             expect(page.get_by_role('button', name='选中文字：真实保存 · 秋日上新', exact=True)).to_be_visible()
             assert api(f'/projects/{project_id}')['design'] == stored['design']
@@ -120,7 +145,7 @@ def main() -> int:
 
             current = 'upload-ingest-and-save-asset-reference'
             page.get_by_role('navigation', name='编辑工具').get_by_role('button', name='上传', exact=True).click()
-            page.locator('input[type=file]').set_input_files({'name': f'e2e-upload-{run_id}.jpg', 'mimeType': 'image/jpeg', 'buffer': (ROOT / 'public/assets/coffee.jpg').read_bytes()})
+            page.locator('.ed-root input[type=file]').set_input_files({'name': f'e2e-upload-{run_id}.jpg', 'mimeType': 'image/jpeg', 'buffer': (ROOT / 'public/assets/coffee.jpg').read_bytes()})
             expect(page.get_by_text('素材已上传并加入画布', exact=True)).to_be_visible(timeout=90000)
             save()
             assets = api('/assets')
@@ -181,6 +206,7 @@ def main() -> int:
 
             current = 'folders-and-brand-persist'
             page.get_by_role('button', name='返回工作区').click()
+            leave_studio()
             nav('我的项目')
             project_preview = page.get_by_role('img', name=title + '预览', exact=True)
             expect(project_preview).to_be_visible()
@@ -231,9 +257,9 @@ def main() -> int:
             draft = '非 AI 回归：仅保存这段需求草稿，不发送生成任务'
             prompt.fill(draft)
             if args.expect_ai_disabled:
-                report['aiSubmissionAttempted'] = True
-                page.get_by_role('button', name='发送设计需求').click()
-                expect(page.get_by_text('AI 创作尚未配置。需求已保留，你可以添加模板、素材或空白画板继续设计。', exact=True)).to_be_visible()
+                expect(page.get_by_role('button', name='发送设计需求')).to_be_disabled()
+                expect(page.locator('.st-composer-footnote')).to_contain_text('未启用')
+                report['aiBlockedBeforeSubmission'] = True
             page.keyboard.press('Meta+s' if sys.platform == 'darwin' else 'Control+s')
             expect(page.locator('.st-board-actions [role=status]')).to_have_text('已保存到工作空间', timeout=20000)
             studio_id = page.url.split('#studio/')[-1]
@@ -241,7 +267,7 @@ def main() -> int:
             page.reload(wait_until='domcontentloaded')
             expect(prompt).to_have_value(draft)
             assert [j['id'] for j in api('/jobs')] == [j['id'] for j in before_jobs]
-            check(current, {'aiEnabled': ai_enabled, 'submissionAttempted': bool(args.expect_ai_disabled), 'jobCountUnchanged': True, 'draftRestoredAfterReload': True})
+            check(current, {'aiEnabled': ai_enabled, 'submissionAttempted': False, 'jobCountUnchanged': True, 'draftRestoredAfterReload': True})
             screenshot('05-studio-draft')
 
             current = 'logout-and-login-durable-data'
